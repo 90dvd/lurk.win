@@ -1,10 +1,50 @@
 --[[
-    lurk.win — BedWars
+    lurk.win - BedWars
     Inject:
-      loadstring(game:HttpGet("https://raw.githubusercontent.com/90dvd/lurk.win/main/bedwars.lua"))()
+      loadstring(game:HttpGet("https://raw.githubusercontent.com/90dvd/lurk.win/refs/heads/main/bedwars.lua"))()
 ]]
 
-local Lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.min.lua"))() or INSui
+-- Matcha: HttpGet never errors (404/empty body). loadstring drops returns -> use INSui global.
+-- Prefer vendored uilib (same repo) to avoid truncated/foreign CDN responses.
+local function fetch(url)
+    local body = game:HttpGet(url, { ["Accept-Encoding"] = "identity" })
+    if type(body) ~= "string" or #body < 32 then
+        return nil, "empty"
+    end
+    if string.sub(body, 1, 3) == "404" or string.sub(body, 1, 1) == "<" then
+        return nil, "http-error"
+    end
+    local c = string.byte(body, 1)
+    if not c or c < 32 or c == 127 then
+        return nil, "binary"
+    end
+    return body
+end
+
+local function loadInsUi()
+    local urls = {
+        "https://raw.githubusercontent.com/90dvd/lurk.win/refs/heads/main/lib/uilib.min.lua",
+        "https://raw.githubusercontent.com/90dvd/lurk.win/main/lib/uilib.min.lua",
+        "https://cdn.jsdelivr.net/gh/90dvd/lurk.win@main/lib/uilib.min.lua",
+        "https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/refs/heads/main/uilib.min.lua",
+    }
+    for i = 1, #urls do
+        local src, err = fetch(urls[i])
+        if src then
+            local fn = loadstring(src, "INSui")
+            if type(fn) == "function" then
+                pcall(fn)
+            end
+            local lib = rawget(_G, "INSui") or (getgenv and getgenv().INSui)
+            if lib then
+                return lib
+            end
+        end
+    end
+    return nil
+end
+
+local Lib = loadInsUi()
 if not Lib then
     error("[lurk.win] INS-ui failed to load")
 end
