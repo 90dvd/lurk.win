@@ -4,44 +4,70 @@
       loadstring(game:HttpGet("https://raw.githubusercontent.com/90dvd/lurk.win/refs/heads/main/bedwars.lua"))()
 ]]
 
--- Matcha: HttpGet never errors (404/empty body). loadstring drops returns -> use INSui global.
--- Prefer vendored uilib (same repo) to avoid truncated/foreign CDN responses.
+-- Matcha notes:
+-- - HttpGet never throws; 404/empty come back as body/"".
+-- - loadstring drops chunk returns; INS-ui publishes global INSui.
+-- - syntax errors from loadstring print on call and are not catchable -> only exec clean sources once.
+local function envGet(key)
+    local v
+    pcall(function() v = getgenv()[key] end)
+    if v ~= nil then return v end
+    pcall(function() v = _G[key] end)
+    return v
+end
+
+local function envSet(key, value)
+    pcall(function() getgenv()[key] = value end)
+    pcall(function() _G[key] = value end)
+end
+
 local function fetch(url)
-    local body = game:HttpGet(url, { ["Accept-Encoding"] = "identity" })
-    if type(body) ~= "string" or #body < 32 then
-        return nil, "empty"
+    -- plain HttpGet only (MatchaScripts / INS-ui style). No headers table.
+    local body = game:HttpGet(url)
+    if type(body) ~= "string" or #body < 64 then
+        return nil
+    end
+    -- strip UTF-8 BOM if present
+    if string.byte(body, 1) == 0xEF and string.byte(body, 2) == 0xBB and string.byte(body, 3) == 0xBF then
+        body = string.sub(body, 4)
+    end
+    local b1 = string.byte(body, 1)
+    if not b1 or b1 < 32 or b1 == 127 then
+        return nil
     end
     if string.sub(body, 1, 3) == "404" or string.sub(body, 1, 1) == "<" then
-        return nil, "http-error"
+        return nil
     end
-    local c = string.byte(body, 1)
-    if not c or c < 32 or c == 127 then
-        return nil, "binary"
+    -- must look like the real INS-ui payload
+    if not string.find(body, 'INSui', 1, true) then
+        return nil
+    end
+    if string.sub(body, 1, 5) ~= "local" and string.sub(body, 1, 2) ~= "--" then
+        return nil
     end
     return body
 end
 
 local function loadInsUi()
-    local urls = {
-        "https://raw.githubusercontent.com/90dvd/lurk.win/refs/heads/main/lib/uilib.min.lua",
-        "https://raw.githubusercontent.com/90dvd/lurk.win/main/lib/uilib.min.lua",
-        "https://cdn.jsdelivr.net/gh/90dvd/lurk.win@main/lib/uilib.min.lua",
-        "https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/refs/heads/main/uilib.min.lua",
-    }
-    for i = 1, #urls do
-        local src, err = fetch(urls[i])
-        if src then
-            local fn = loadstring(src, "INSui")
-            if type(fn) == "function" then
-                pcall(fn)
-            end
-            local lib = rawget(_G, "INSui") or (getgenv and getgenv().INSui)
-            if lib then
-                return lib
-            end
-        end
+    local existing = envGet("INSui")
+    if existing then
+        return existing
     end
-    return nil
+
+    -- single primary URL to avoid repeating Matcha parse spam on bad bodies
+    local src = fetch("https://raw.githubusercontent.com/90dvd/lurk.win/refs/heads/main/lib/uilib.min.lua")
+    if not src then
+        src = fetch("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/refs/heads/main/uilib.min.lua")
+    end
+    if not src then
+        return nil
+    end
+
+    local fn = loadstring(src, "INSui")
+    if type(fn) == "function" then
+        pcall(fn)
+    end
+    return envGet("INSui")
 end
 
 local Lib = loadInsUi()
@@ -53,8 +79,11 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
-getgenv().Lurk = getgenv().Lurk or {}
-local CFG = getgenv().Lurk
+local CFG = envGet("Lurk")
+if type(CFG) ~= "table" then
+    CFG = {}
+    envSet("Lurk", CFG)
+end
 CFG.BedWars = CFG.BedWars or {}
 local BW = CFG.BedWars
 
@@ -110,7 +139,7 @@ local win = Lib:CreateWindow({
 })
 
 win:AddSettingsTab("cog")
-Lib:Notify("lurk.win", "BedWars loaded — press P to toggle", 4, "success")
+Lib:Notify("lurk.win", "BedWars loaded - press P to toggle", 4, "success")
 
 --------------------------------------------------------------------------
 -- Combat
@@ -172,7 +201,7 @@ end)
 local beds = visuals:Section("Beds", "Right", "bed locations")
 beds:Toggle("Bed ESP", BW.EspBeds, function(on) BW.EspBeds = on end)
 beds:Colorpicker("Bed color", Color3.fromRGB(255, 120, 140), function() end, 1)
-beds:Info("Bed markers use Drawing — stay visible while the menu is closed.")
+beds:Info("Bed markers use Drawing - stay visible while the menu is closed.")
 
 local hud = visuals:Section("HUD", "Right")
 hud:Label(function()
@@ -219,7 +248,7 @@ util:Keybind("Panic key", "k", function(key)
 end)
 util:Divider("Server")
 util:Button("Rejoin", function()
-    Lib:Notify("Server", "rejoining…", 2)
+    Lib:Notify("Server", "rejoining...", 2)
     pcall(function()
         game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
     end)
