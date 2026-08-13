@@ -1,8 +1,13 @@
 --[[
     lurk.win - BedWars
     Inject:
+      _G.hybrid = false -- set to true if ur on hybrid
       loadstring(game:HttpGet("https://raw.githubusercontent.com/90dvd/lurk.win/refs/heads/main/bedwars.lua"))()
 ]]
+
+if _G.hybrid == nil then
+    _G.hybrid = false
+end
 
 -- Matcha notes:
 -- - HttpGet never throws; 404/empty come back as body/"".
@@ -93,51 +98,32 @@ end
 def(BW, "KillAura", false)
 def(BW, "KillAuraRange", 18)
 def(BW, "KillAuraKey", "q")
-def(BW, "AimAssist", false)
-def(BW, "AimFov", 120)
-def(BW, "AimSmooth", 0.35)
-def(BW, "AimPart", "Head")
-def(BW, "AimReaction", 120)
-def(BW, "StickyTarget", true)
-def(BW, "TeamCheck", true)
-def(BW, "WallCheck", true)
-def(BW, "VisibleOnly", false)
-def(BW, "AimDistLo", 0)
-def(BW, "AimDistHi", 150)
-def(BW, "Triggerbot", false)
-def(BW, "TriggerDelay", 80)
-def(BW, "TriggerChance", 100)
-def(BW, "TriggerScoped", false)
-def(BW, "NoRecoil", false)
-def(BW, "NoSpread", false)
-def(BW, "FireRate", 1.0)
-def(BW, "FastReload", false)
-def(BW, "InfAmmo", false)
-def(BW, "AutoBlock", false)
-def(BW, "AutoBuy", false)
-def(BW, "EspEnabled", true)
-def(BW, "EspBoxes", true)
-def(BW, "EspBoxStyle", "Corner")
-def(BW, "EspNames", true)
-def(BW, "EspDistance", true)
-def(BW, "EspHealth", true)
-def(BW, "EspWeapon", false)
-def(BW, "EspTextSize", 13)
-def(BW, "EspBeds", true)
-def(BW, "EspColor", Color3.fromRGB(122, 134, 255))
-def(BW, "EspFill", Color3.fromRGB(122, 134, 255))
-def(BW, "EspFillAlpha", 0.35)
-def(BW, "EspMaxDist", 300)
-def(BW, "EspTeamCheck", true)
-def(BW, "Chams", false)
-def(BW, "ChamsMaterial", "ForceField")
-def(BW, "ChamsAlpha", 0.3)
+def(BW, "BowAimbot", false)
+def(BW, "BowAimFov", 180)
+def(BW, "BowFovCircle", true)
+def(BW, "BowDebug", true)
+def(BW, "BowTargetNpcs", true)
+def(BW, "BowSpeed", 240)
+def(BW, "BowGravity", 50)
+def(BW, "SilentBAimbot", false)
+def(BW, "SilentBAimFov", 220)
+def(BW, "ResourceEsp", false)
+def(BW, "EspIron", true)
+def(BW, "EspDiamonds", true)
+def(BW, "EspEmeralds", true)
+def(BW, "NpcEsp", false)
+def(BW, "NpcBhaa", true)
+def(BW, "NpcTitan", true)
+def(BW, "NpcDimGuard", true)
+def(BW, "KitEsp", false)
+def(BW, "KitMetal", true)
+def(BW, "KitStar", true)
+def(BW, "KitBee", true)
+def(BW, "KitEldertree", true)
 def(BW, "Fullbright", false)
 def(BW, "TimeOfDay", 14)
 def(BW, "NoFog", false)
 def(BW, "NoShadows", false)
-def(BW, "Watermark", true)
-def(BW, "FpsCounter", false)
 def(BW, "HighlightFriends", true)
 def(BW, "HighlightEnemies", false)
 def(BW, "SortBy", "Distance")
@@ -175,7 +161,7 @@ local win = Lib:CreateWindow({
     menuKey       = "p",
     configName    = "default",
     configFolder  = "lurk_bedwars",
-    smartFps      = false,
+    smartFps      = true,
     checkboxStyle = true,
     opacity       = 98,
     logo          = "https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/assets/logo.png",
@@ -188,68 +174,39 @@ win:AddSettingsTab("gear")
 Lib:Notify("lurk.win", "Press P to toggle the menu", 4, "info")
 
 --------------------------------------------------------------------------
--- COMBAT (showcase layout + BedWars Kill Aura)
+-- COMBAT
 --------------------------------------------------------------------------
 Lib:Category("COMBAT")
 local combat = win:Tab("Combat", "sword")
 
-local aim = combat:Section("Aimbot", "Left", "silent + legit aim assist")
-local aimOn = aim:Toggle("Enabled", BW.AimAssist, function(on)
-    BW.AimAssist = on
-    Lib:Notify("Aimbot", on and "enabled" or "disabled", 2, on and "success" or "warning")
-end)
-aimOn:AddKeybind("e", "Hold")
-aimOn:AddColorpicker("FOV color", Color3.fromRGB(120, 255, 140))
-
-aim:Divider("Targeting")
-aim:Dropdown("Target part", {BW.AimPart}, {"Head", "Torso", "Neck", "Random"}, false, function(v)
-    BW.AimPart = v[1] or "Head"
-end)
-aim:Dropdown("Hitboxes", {"Head"}, {"Head", "Torso", "Neck", "Stomach", "Legs"}, true, function(v) end, "multi-select", true)
-aim:Slider("FOV", BW.AimFov, 1, 10, 500, "px", function(v) BW.AimFov = v end)
-aim:Toggle("Sticky target", BW.StickyTarget, function(on) BW.StickyTarget = on end, "keep the same target while it stays in FOV")
-
-aim:Divider("Smoothing")
-aim:Slider("Smoothness", BW.AimSmooth, 0.01, 0, 1, "", function(v) BW.AimSmooth = v end)
-aim:Slider("Reaction time", BW.AimReaction, 5, 0, 400, "ms", function(v) BW.AimReaction = v end)
-
-aim:Divider("Safety")
-local wall = aim:Toggle("Wall check", BW.WallCheck, function(on) BW.WallCheck = on end)
-aim:Toggle("Visible only", BW.VisibleOnly, function(on) BW.VisibleOnly = on end):DependsOn(wall)
-aim:RangeSlider("Distance", BW.AimDistLo, BW.AimDistHi, 1, 0, 500, "m", function(lo, hi)
-    BW.AimDistLo, BW.AimDistHi = lo, hi
-end)
-
-local trig = combat:Section("Triggerbot", "Right")
-trig:Toggle("Enabled", BW.Triggerbot, function(on) BW.Triggerbot = on end):AddKeybind("t", "Toggle")
-
-trig:Divider("Timing")
-trig:Slider("Delay", BW.TriggerDelay, 1, 0, 500, "ms", function(v) BW.TriggerDelay = v end)
-trig:Slider("Hit chance", BW.TriggerChance, 1, 1, 100, "%", function(v) BW.TriggerChance = v end)
-
-trig:Divider("Filters")
-trig:Toggle("Team check", BW.TeamCheck, function(on) BW.TeamCheck = on end)
-trig:Toggle("Wall check", BW.WallCheck, function(on) BW.WallCheck = on end)
-trig:Toggle("Scoped only", BW.TriggerScoped, function(on) BW.TriggerScoped = on end, "fire only while aiming down sights")
-
-local wep = combat:Section("Weapon", "Right")
-wep:Toggle("No recoil", BW.NoRecoil, function(on) BW.NoRecoil = on end)
-wep:Toggle("No spread", BW.NoSpread, function(on) BW.NoSpread = on end)
-wep:Slider("Fire rate", BW.FireRate, 0.1, 0.5, 3, "x", function(v) BW.FireRate = v end)
-
-wep:Divider("Ammo")
-wep:Toggle("Fast reload", BW.FastReload, function(on) BW.FastReload = on end)
-wep:Toggle("Infinite ammo", BW.InfAmmo, function(on) BW.InfAmmo = on end):SetRisk():Tooltip("server-sided games will flag this")
-
-local ka = combat:Section("Kill Aura", "Left", "BedWars melee aura")
+local ka = combat:Section("Kill Aura", "Left", "melee hits in range")
 local kaToggle = ka:Toggle("Enabled", BW.KillAura, function(on)
     BW.KillAura = on
     Lib:Notify("Kill Aura", on and "on" or "off", 1.5, on and "success" or "warning")
 end)
 kaToggle:AddKeybind(BW.KillAuraKey or "q", "Toggle")
 ka:Slider("Range", BW.KillAuraRange, 1, 5, 30, "studs", function(v) BW.KillAuraRange = v end)
-ka:Toggle("Auto block", BW.AutoBlock, function(on) BW.AutoBlock = on end)
-ka:Toggle("Auto buy wool", BW.AutoBuy, function(on) BW.AutoBuy = on end)
+
+local bow = combat:Section("Bow Aimbot", "Right", "locks onto players while drawing")
+local bowOn = bow:Toggle("Enabled", BW.BowAimbot, function(on)
+    BW.BowAimbot = on
+    Lib:Notify("Bow Aimbot", on and "on" or "off", 1.5, on and "success" or "warning")
+end)
+bowOn:AddKeybind("e", "Hold")
+bow:Slider("FOV", BW.BowAimFov, 1, 20, 400, "px", function(v) BW.BowAimFov = v end)
+bow:Toggle("FOV circle", BW.BowFovCircle, function(on) BW.BowFovCircle = on end)
+bow:Toggle("Debug", BW.BowDebug, function(on) BW.BowDebug = on end, "shows why aim is skipping")
+bow:Toggle("Target NPCs", BW.BowTargetNpcs, function(on)
+    BW.BowTargetNpcs = on
+end, "also lock onto Dim Guards, Titans, Bhaa - no Matcha NPC register needed")
+
+local silent = combat:Section("Silent B-Aimbot", "Right", "silent bow aim, no visible snap")
+local silentOn = silent:Toggle("Enabled", BW.SilentBAimbot, function(on)
+    BW.SilentBAimbot = on
+    Lib:Notify("Silent B-Aimbot", on and "on" or "off", 1.5, on and "success" or "warning")
+end)
+silentOn:AddKeybind("r", "Toggle")
+silent:Slider("FOV", BW.SilentBAimFov, 1, 20, 500, "px", function(v) BW.SilentBAimFov = v end)
 
 --------------------------------------------------------------------------
 -- VISUALS
@@ -257,64 +214,28 @@ ka:Toggle("Auto buy wool", BW.AutoBuy, function(on) BW.AutoBuy = on end)
 Lib:Category("VISUALS")
 local vis = win:Tab("Visuals", "eye")
 
-local esp = vis:Section("Player ESP", "Left", "see players through walls")
-esp:Toggle("Enabled", BW.EspEnabled, function(on) BW.EspEnabled = on end):AddKeybind("h", "Toggle")
+local res = vis:Section("Resource ESP", "Left", "generators and dropped ores")
+local resOn = res:Toggle("Enabled", BW.ResourceEsp, function(on) BW.ResourceEsp = on end)
+resOn:AddKeybind("h", "Toggle")
+res:Divider("Ores")
+res:Toggle("Iron", BW.EspIron, function(on) BW.EspIron = on end):DependsOn(resOn)
+res:Toggle("Diamonds", BW.EspDiamonds, function(on) BW.EspDiamonds = on end):DependsOn(resOn)
+res:Toggle("Emeralds", BW.EspEmeralds, function(on) BW.EspEmeralds = on end):DependsOn(resOn)
 
-esp:Divider("Boxes")
-esp:Dropdown("Box style", {BW.EspBoxStyle}, {"2D", "Corner", "3D", "Off"}, false, function(v)
-    BW.EspBoxStyle = v[1] or "Corner"
-    BW.EspBoxes = BW.EspBoxStyle ~= "Off"
-end)
-esp:Colorpicker("Box color", BW.EspColor, function(c) BW.EspColor = c end, 1)
-esp:Colorpicker("Fill color", BW.EspFill, function(c, a)
-    BW.EspFill = c
-    BW.EspFillAlpha = a
-end, BW.EspFillAlpha)
+local npc = vis:Section("NPC ESP", "Right", "map bosses and guards")
+local npcOn = npc:Toggle("Enabled", BW.NpcEsp, function(on) BW.NpcEsp = on end)
+npc:Divider("Targets")
+npc:Toggle("Bhaa", BW.NpcBhaa, function(on) BW.NpcBhaa = on end):DependsOn(npcOn)
+npc:Toggle("Titan", BW.NpcTitan, function(on) BW.NpcTitan = on end):DependsOn(npcOn)
+npc:Toggle("Dim Guard", BW.NpcDimGuard, function(on) BW.NpcDimGuard = on end):DependsOn(npcOn)
 
-esp:Divider("Info")
-esp:Toggle("Name", BW.EspNames, function(on) BW.EspNames = on end)
-esp:Toggle("Distance", BW.EspDistance, function(on) BW.EspDistance = on end)
-esp:Toggle("Health bar", BW.EspHealth, function(on) BW.EspHealth = on end)
-esp:Toggle("Weapon", BW.EspWeapon, function(on) BW.EspWeapon = on end)
-esp:Slider("Text size", BW.EspTextSize, 1, 8, 24, "px", function(v) BW.EspTextSize = v end)
-
-esp:Divider("Filters")
-esp:RangeSlider("Render distance", 0, BW.EspMaxDist, 5, 0, 1000, "m", function(_, hi)
-    BW.EspMaxDist = hi
-end)
-esp:Toggle("Team check", BW.EspTeamCheck, function(on) BW.EspTeamCheck = on end)
-
-local hud = vis:Section("Overlay", "Left")
-hud:Label(function() return "Local time: " .. os.date("%X") end)
-hud:Toggle("Watermark", BW.Watermark, function(on) BW.Watermark = on end)
-hud:Toggle("FPS counter", BW.FpsCounter, function(on) BW.FpsCounter = on end)
-hud:Info("overlay drawings stay when the menu is closed")
-
-local ch = vis:Section("Chams", "Right")
-ch:Toggle("Enabled", BW.Chams, function(on) BW.Chams = on end)
-ch:Dropdown("Material", {BW.ChamsMaterial}, {"ForceField", "Neon", "Flat"}, false, function(v)
-    BW.ChamsMaterial = v[1] or "ForceField"
-end)
-ch:Colorpicker("Visible color", Color3.fromRGB(140, 255, 160))
-ch:Colorpicker("Hidden color", Color3.fromRGB(255, 120, 120))
-ch:Slider("Transparency", BW.ChamsAlpha, 0.05, 0, 1, "", function(v) BW.ChamsAlpha = v end)
-
-local worldVis = vis:Section("World", "Right")
-worldVis:Toggle("Fullbright", BW.Fullbright, function(on) BW.Fullbright = on end)
-worldVis:Slider("Time of day", BW.TimeOfDay, 0.1, 0, 24, "h", function(v) BW.TimeOfDay = v end)
-worldVis:Toggle("No fog", BW.NoFog, function(on) BW.NoFog = on end)
-worldVis:Colorpicker("Ambient", Color3.fromRGB(255, 255, 255), function(c) end)
-
-worldVis:Divider("Extras")
-worldVis:Dropdown("Weather", {BW.Weather}, {"Clear", "Rain", "Snow"}, false, function(v)
-    BW.Weather = v[1] or "Clear"
-end)
-worldVis:Toggle("No shadows", BW.NoShadows, function(on) BW.NoShadows = on end)
-
-local beds = vis:Section("Beds", "Right", "BedWars bed markers")
-beds:Toggle("Bed ESP", BW.EspBeds, function(on) BW.EspBeds = on end)
-beds:Colorpicker("Bed color", Color3.fromRGB(255, 120, 140), function() end, 1)
-beds:Info("Bed markers use Drawing - stay visible while the menu is closed.")
+local kit = vis:Section("Kit ESP", "Left", "kit-specific world objects")
+local kitOn = kit:Toggle("Enabled", BW.KitEsp, function(on) BW.KitEsp = on end)
+kit:Divider("Kits")
+kit:Toggle("Metal ESP", BW.KitMetal, function(on) BW.KitMetal = on end):DependsOn(kitOn)
+kit:Toggle("Star ESP", BW.KitStar, function(on) BW.KitStar = on end):DependsOn(kitOn)
+kit:Toggle("Bee ESP", BW.KitBee, function(on) BW.KitBee = on end):DependsOn(kitOn)
+kit:Toggle("Eldertree ESP", BW.KitEldertree, function(on) BW.KitEldertree = on end):DependsOn(kitOn)
 
 --------------------------------------------------------------------------
 -- SYSTEM: World tab with Players + Environment subs (was missing)
@@ -469,13 +390,791 @@ box:Stat(function() return "Players: " .. #Players:GetPlayers() end)
 box:Stat(function() return "KA: " .. (BW.KillAura and "ON" or "OFF") end)
 box:Bar(0.7)
 
+local bowDbgLines = { "bow debug idle" }
+local dbgBox = Lib:CreateBox({ title = "Bow Debug", position = Vector2.new(24, 360), width = 260 })
+dbgBox:Text(function()
+    return bowDbgLines[1] or ""
+end)
+dbgBox:Text(function()
+    return bowDbgLines[2] or ""
+end)
+dbgBox:Text(function()
+    return bowDbgLines[3] or ""
+end)
+dbgBox:Text(function()
+    return bowDbgLines[4] or ""
+end)
+dbgBox:Text(function()
+    return bowDbgLines[5] or ""
+end)
+
 --------------------------------------------------------------------------
--- Lightweight runtime hooks
+-- Runtime (Kill Aura / ESP / Bow aim from MatchaLuauVM Bedwars.lua)
 --------------------------------------------------------------------------
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Camera = Workspace.CurrentCamera
+
+local ismouse1 = envGet("ismouse1pressed")
+if type(ismouse1) ~= "function" then
+    ismouse1 = function() return false end
+end
+
+local function pickFn(...)
+    for i = 1, select("#", ...) do
+        local f = select(i, ...)
+        if type(f) == "function" then return f, true end
+    end
+    return function() end, false
+end
+
+local mousemoverel, hasMoveRel = pickFn(envGet("mousemoverel"), rawget(_G, "mousemoverel"))
+local mousemoveabs, hasMoveAbs = pickFn(envGet("mousemoveabs"), rawget(_G, "mousemoveabs"))
+local isrbxactive = pickFn(envGet("isrbxactive"), rawget(_G, "isrbxactive"), function() return true end)
+local setrobloxinput = pickFn(envGet("setrobloxinput"), rawget(_G, "setrobloxinput"))
+
 local function characterHumanoid()
     local char = LocalPlayer.Character
     if not char then return nil end
     return char:FindFirstChildOfClass("Humanoid")
+end
+
+local function findNetManaged()
+    local node = ReplicatedStorage
+    local path = { "rbxts_include", "node_modules", "@rbxts", "net", "out", "_NetManaged" }
+    for i = 1, #path do
+        if not node then return nil end
+        node = node:FindFirstChild(path[i])
+    end
+    return node
+end
+
+local NetManaged, SwordHitEvent, ProjectileFire
+local function refreshRemotes()
+    NetManaged = findNetManaged()
+    if NetManaged then
+        SwordHitEvent = NetManaged:FindFirstChild("SwordHit")
+        ProjectileFire = NetManaged:FindFirstChild("ProjectileFire") or NetManaged:FindFirstChild("FireProjectile")
+    end
+end
+refreshRemotes()
+
+local swordList = {
+    "wood_sword", "stone_sword", "iron_sword", "diamond_sword", "og_diamond_sword", "ice_sword", "emerald_sword", "og_emerald_sword", "void_sword", "glitch_wood_sword", "glitch_void_sword",
+    "wood_dao", "stone_dao", "iron_dao", "diamond_dao", "emerald_dao",
+    "wood_dagger", "stone_dagger", "iron_dagger", "diamond_dagger", "mythic_dagger",
+    "wood_scythe", "stone_scythe", "iron_scythe", "diamond_scythe", "mythic_scythe", "scythe", "reaper_scythe", "sky_scythe",
+    "wood_gauntlets", "stone_gauntlets", "iron_gauntlets", "diamond_gauntlets", "mythic_gauntlets_plain", "mythic_gauntlets",
+    "rageblade", "double_edge_sword", "spirit_dagger", "spirit_dagger_left", "pirate_sword_fp", "cutlass_ghost", "big_wood_sword", "heavenly_sword", "infernal_saber", "bear_claws", "baguette", "knockback_fish",
+    "taser", "glitch_taser", "hot_potato", "frying_pan", "juggernaut_rage_blade", "battle_axe", "mass_hammer", "twirlblade", "noctium_blade", "noctium_blade_2", "noctium_blade_3", "noctium_blade_4",
+    "laser_sword", "frosty_hammer", "sparkler", "toy_hammer", "rainbow_axe", "wizard_stick", "hero_magical_girl_rapier", "villain_magical_girl_rapier", "hero_scissor_sword", "villain_scissor_sword",
+    "wood_gun_blade", "stone_gun_blade", "iron_gun_blade", "diamond_gun_blade", "emerald_gun_blade", "pillow", "iron_pickaxe_sword", "diamond_pickaxe_sword", "knight_shield", "tinkers_wrench", "whisper_feather",
+    "super_guitar", "guards_spear"
+}
+
+local function getEquippedWeaponDirect()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    for i = 1, #swordList do
+        local found = char:FindFirstChild(swordList[i])
+        if found and found:IsA("Tool") then
+            return found
+        end
+    end
+    return nil
+end
+
+local function getAttackWeapon()
+    local weapon = getEquippedWeaponDirect()
+    if weapon then return weapon end
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChildWhichIsA("Tool")
+end
+
+local function getEquippedBow()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local kids = char:GetChildren()
+    for i = 1, #kids do
+        local child = kids[i]
+        if child and child:IsA("Tool") then
+            local n = string.lower(tostring(child.Name))
+            if string.find(n, "bow", 1, true)
+                or string.find(n, "crossbow", 1, true)
+                or string.find(n, "headhunter", 1, true)
+                or string.find(n, "tactical", 1, true)
+                or string.find(n, "archer", 1, true)
+                or string.find(n, "firework", 1, true) then
+                return child
+            end
+        end
+    end
+    return char:FindFirstChildWhichIsA("Tool")
+end
+
+local function npcKind(obj)
+    local n = string.lower(tostring(obj.Name))
+    if string.find(n, "bhaa", 1, true) or string.find(n, "bahaa", 1, true) then
+        return "Bhaa"
+    end
+    if string.find(n, "titan", 1, true) then
+        return "Titan"
+    end
+    if string.find(n, "guard", 1, true)
+        or string.find(n, "guardian", 1, true)
+        or string.find(n, "diamond", 1, true)
+        or string.find(n, "dimond", 1, true) then
+        return "DimGuard"
+    end
+    return nil
+end
+
+local function getModelRoot(obj)
+    if not obj then return nil end
+    return obj:FindFirstChild("HumanoidRootPart")
+        or obj:FindFirstChild("Torso")
+        or obj:FindFirstChild("UpperTorso")
+        or obj.PrimaryPart
+end
+
+local function isLocalModel(obj)
+    local char = LocalPlayer.Character
+    return obj == char or obj.Name == LocalPlayer.Name
+end
+
+local function isPlayerModel(obj)
+    if not obj or not obj:IsA("Model") then return false end
+    if not obj:FindFirstChild("HumanoidRootPart") or not obj:FindFirstChild("Humanoid") then return false end
+    if isLocalModel(obj) then return false end
+    local plr = Players:FindFirstChild(obj.Name)
+    return plr ~= nil and plr ~= LocalPlayer
+end
+
+local function isEntityModel(obj)
+    if not obj or obj.ClassName ~= "Model" then return false end
+    if not obj:FindFirstChildOfClass("Humanoid") then return false end
+    if not getModelRoot(obj) then return false end
+    if isLocalModel(obj) then return false end
+    if Players:FindFirstChild(obj.Name) ~= nil then return false end
+    if npcKind(obj) then return true end
+    return BW.BowTargetNpcs == true
+end
+
+local espConfigs = {
+    Player = {
+        validator = isPlayerModel,
+        getTarget = function(obj) return getModelRoot(obj) end,
+        text = function(obj) return obj.Name end,
+        color = Color3.fromRGB(255, 255, 255),
+        enabled = function() return BW.KillAura or BW.BowAimbot or BW.SilentBAimbot end,
+        draw = function() return false end,
+    },
+    Entity = {
+        validator = isEntityModel,
+        getTarget = function(obj) return getModelRoot(obj) end,
+        text = function(obj) return obj.Name end,
+        color = Color3.fromRGB(255, 100, 100),
+        enabled = function() return BW.KillAura or BW.NpcEsp or BW.BowAimbot or BW.SilentBAimbot end,
+        draw = function(obj)
+            if not BW.NpcEsp then return false end
+            local kind = npcKind(obj)
+            if kind == "Bhaa" then return BW.NpcBhaa end
+            if kind == "Titan" then return BW.NpcTitan end
+            if kind == "DimGuard" then return BW.NpcDimGuard end
+            return false
+        end,
+    },
+    Metal = {
+        validator = function(obj)
+            return obj:IsA("Model") and obj:FindFirstChild("hidden-metal-prompt") and obj:FindFirstChild("Part")
+        end,
+        getTarget = function(obj) return obj.Part end,
+        text = "Metal",
+        color = Color3.fromRGB(0, 255, 255),
+        enabled = function() return BW.KitEsp and BW.KitMetal end,
+        draw = function() return BW.KitEsp and BW.KitMetal end,
+    },
+    Bee = {
+        validator = function(obj) return obj.Name == "Bee" and obj:FindFirstChild("Root") end,
+        getTarget = function(obj) return obj.Root end,
+        text = "Bee",
+        color = Color3.fromRGB(255, 255, 0),
+        enabled = function() return BW.KitEsp and BW.KitBee end,
+        draw = function() return BW.KitEsp and BW.KitBee end,
+    },
+    Eldertree = {
+        validator = function(obj) return obj.Name == "TreeOrb" and obj:FindFirstChild("Spirit") end,
+        getTarget = function(obj) return obj.Spirit end,
+        text = "Eldertree",
+        color = Color3.fromRGB(0, 255, 0),
+        enabled = function() return BW.KitEsp and BW.KitEldertree end,
+        draw = function() return BW.KitEsp and BW.KitEldertree end,
+    },
+    Star = {
+        validator = function(obj)
+            return (obj.Name == "CritStar" or obj.Name == "VitalityStar") and obj:FindFirstChild("RootPart")
+        end,
+        getTarget = function(obj) return obj.RootPart end,
+        text = function(obj) return obj.Name == "CritStar" and "Crit Star" or "Vitality Star" end,
+        color = function(obj)
+            return obj.Name == "CritStar" and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(144, 238, 144)
+        end,
+        enabled = function() return BW.KitEsp and BW.KitStar end,
+        draw = function() return BW.KitEsp and BW.KitStar end,
+    },
+    iron = {
+        validator = function(obj) return obj:IsA("BasePart") and obj.Name == "iron" and obj.Parent and obj.Parent.Name == "ItemDrops" end,
+        getTarget = function(obj) return obj end,
+        text = "Iron",
+        color = Color3.fromRGB(200, 200, 200),
+        enabled = function() return BW.ResourceEsp and BW.EspIron end,
+        draw = function() return BW.ResourceEsp and BW.EspIron end,
+    },
+    diamond = {
+        validator = function(obj) return obj:IsA("BasePart") and obj.Name == "diamond" and obj.Parent and obj.Parent.Name == "ItemDrops" end,
+        getTarget = function(obj) return obj end,
+        text = "Diamond",
+        color = Color3.fromRGB(0, 191, 255),
+        enabled = function() return BW.ResourceEsp and BW.EspDiamonds end,
+        draw = function() return BW.ResourceEsp and BW.EspDiamonds end,
+    },
+    emerald = {
+        validator = function(obj) return obj:IsA("BasePart") and obj.Name == "emerald" and obj.Parent and obj.Parent.Name == "ItemDrops" end,
+        getTarget = function(obj) return obj end,
+        text = "Emerald",
+        color = Color3.fromRGB(0, 230, 115),
+        enabled = function() return BW.ResourceEsp and BW.EspEmeralds end,
+        draw = function() return BW.ResourceEsp and BW.EspEmeralds end,
+    },
+}
+
+local trackedObjects = {}
+
+local function getUniqueIdentifier(model)
+    local addr
+    pcall(function() addr = model.Address end)
+    return addr or tostring(model)
+end
+
+local function hideDraw(data)
+    if not data or data.noDraw then return end
+    if data.box then data.box.Visible = false end
+    if data.text then data.text.Visible = false end
+    if data.amountText then data.amountText.Visible = false end
+end
+
+local TRACK_CAP = 48
+
+local function createESP(obj, espType, config)
+    local id = getUniqueIdentifier(obj)
+    if trackedObjects[id] then return end
+    local part = config.getTarget(obj)
+    if not part then return end
+
+    local count = 0
+    for _ in pairs(trackedObjects) do
+        count = count + 1
+        if count >= TRACK_CAP then return end
+    end
+
+    local wantsDraw = config.draw and config.draw(obj)
+    if not wantsDraw then
+        trackedObjects[id] = {
+            noDraw = true,
+            part = part,
+            obj = obj,
+            espType = espType,
+            config = config,
+        }
+        return
+    end
+
+    local finalColor = type(config.color) == "function" and config.color(obj) or config.color
+    local finalText = type(config.text) == "function" and config.text(obj) or config.text
+
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Color = finalColor
+    box.Filled = false
+
+    local text = Drawing.new("Text")
+    text.Visible = false
+    text.Text = finalText
+    text.Color = Color3.fromRGB(255, 255, 255)
+    text.Center = true
+    text.Outline = true
+    pcall(function() text.FontSize = 13 end)
+
+    local amountText = Drawing.new("Text")
+    amountText.Visible = false
+    amountText.Color = Color3.fromRGB(230, 230, 230)
+    amountText.Center = true
+    amountText.Outline = true
+    pcall(function() amountText.FontSize = 12 end)
+
+    trackedObjects[id] = {
+        box = box,
+        text = text,
+        amountText = amountText,
+        part = part,
+        obj = obj,
+        espType = espType,
+        config = config,
+    }
+end
+
+local function removeESP(id)
+    local data = trackedObjects[id]
+    if not data then return end
+    if data.box then pcall(function() data.box:Remove() end) end
+    if data.text then pcall(function() data.text:Remove() end) end
+    if data.amountText then pcall(function() data.amountText:Remove() end) end
+    trackedObjects[id] = nil
+end
+
+local function classify(obj)
+    for espType, config in pairs(espConfigs) do
+        if config.validator(obj) then
+            return espType, config
+        end
+    end
+    return nil, nil
+end
+
+local function consider(obj, currentScanIds)
+    if not obj then return end
+    local espType, config
+    pcall(function()
+        espType, config = classify(obj)
+    end)
+    if espType and config and config.enabled() then
+        createESP(obj, espType, config)
+        currentScanIds[getUniqueIdentifier(obj)] = true
+    end
+end
+
+local function scanShallow(folder, currentScanIds, depth)
+    if not folder or depth < 0 then return end
+    local ok, kids = pcall(function() return folder:GetChildren() end)
+    if not ok or not kids then return end
+    for i = 1, #kids do
+        consider(kids[i], currentScanIds)
+        if depth > 0 and kids[i] then
+            local className = kids[i].ClassName
+            if className == "Folder" or className == "Model" then
+                scanShallow(kids[i], currentScanIds, depth - 1)
+            end
+        end
+    end
+end
+
+-- Walk Model/Folder trees only (skips map Parts). Finds nested NPCs like Diamond Guardian.
+local function scanNpcTree(root, currentScanIds, depth, budget)
+    if not root or depth < 0 or not budget or budget[1] <= 0 then return end
+    local ok, kids = pcall(function() return root:GetChildren() end)
+    if not ok or not kids then return end
+    for i = 1, #kids do
+        if budget[1] <= 0 then return end
+        local obj = kids[i]
+        if obj then
+            local cn = obj.ClassName
+            if cn == "Model" then
+                local hum
+                pcall(function() hum = obj:FindFirstChild("Humanoid") end)
+                local kind = npcKind(obj)
+                if hum or kind then
+                    consider(obj, currentScanIds)
+                    budget[1] = budget[1] - 1
+                end
+                -- Don't walk into found NPCs or typical map-block models.
+                local n = string.lower(tostring(obj.Name))
+                local skipDeep = hum ~= nil
+                    or n == "block" or n == "wool" or n == "stone" or n == "wood"
+                    or n == "obsidian" or n == "glass" or n == "terracotta"
+                if not skipDeep then
+                    scanNpcTree(obj, currentScanIds, depth - 1, budget)
+                end
+            elseif cn == "Folder" or cn == "Configuration" then
+                scanNpcTree(obj, currentScanIds, depth - 1, budget)
+            elseif cn == "Humanoid" and obj.Parent then
+                consider(obj.Parent, currentScanIds)
+                budget[1] = budget[1] - 1
+            end
+        end
+    end
+end
+
+task.spawn(function()
+    while true do
+        local needCombat = BW.KillAura or BW.BowAimbot or BW.SilentBAimbot
+        pcall(function()
+            if not needCombat and bowOn and bowOn.IsActivated then
+                needCombat = bowOn:IsActivated() == true
+            end
+        end)
+        local needEsp = BW.ResourceEsp or BW.NpcEsp or BW.KitEsp
+        if needCombat or needEsp then
+            local currentScanIds = {}
+
+            local plist = Players:GetPlayers()
+            for i = 1, #plist do
+                local plr = plist[i]
+                if plr ~= LocalPlayer and plr.Character then
+                    consider(plr.Character, currentScanIds)
+                end
+            end
+
+            if BW.ResourceEsp then
+                local itemDropsFolder = Workspace:FindFirstChild("ItemDrops")
+                if itemDropsFolder then
+                    scanShallow(itemDropsFolder, currentScanIds, 0)
+                end
+            end
+
+            if BW.KitEsp then
+                scanShallow(Workspace, currentScanIds, 0)
+                local extra = { "NPCs", "Mobs", "Entities", "LivingEntities" }
+                for i = 1, #extra do
+                    local folder = Workspace:FindFirstChild(extra[i])
+                    if folder then
+                        scanShallow(folder, currentScanIds, 1)
+                    end
+                end
+            end
+
+            if BW.NpcEsp or needCombat then
+                scanNpcTree(Workspace, currentScanIds, 10, { 80 })
+            end
+
+            for id, data in pairs(trackedObjects) do
+                if not currentScanIds[id] or not data.obj or not data.obj.Parent then
+                    removeESP(id)
+                end
+            end
+        else
+            for id in pairs(trackedObjects) do
+                removeESP(id)
+            end
+        end
+
+        if needCombat and not SwordHitEvent then
+            refreshRemotes()
+        end
+
+        task.wait(1.5)
+    end
+end)
+
+local function screenCenter()
+    local vs
+    pcall(function() vs = Camera.ViewportSize end)
+    if vs then
+        return vs.X * 0.5, vs.Y * 0.5
+    end
+    return 960, 540
+end
+
+local UserInputService
+pcall(function() UserInputService = game:GetService("UserInputService") end)
+
+-- Same pixel space as WorldToScreen / mousemoveabs (viewport, top-left origin).
+local function mouseScreenPos()
+    local loc
+    pcall(function()
+        if UserInputService and UserInputService.GetMouseLocation then
+            loc = UserInputService:GetMouseLocation()
+        end
+    end)
+    if loc and loc.X and loc.Y then
+        return loc.X, loc.Y
+    end
+    local mx, my
+    pcall(function()
+        local m = LocalPlayer:GetMouse()
+        mx, my = m.X, m.Y
+    end)
+    if mx then
+        local insetY = 0
+        pcall(function()
+            local gs = game:GetService("GuiService")
+            local inset = gs:GetGuiInset()
+            if inset then insetY = inset.Y end
+        end)
+        return mx, my + insetY
+    end
+    return screenCenter()
+end
+
+local fovCircle, fovFill
+pcall(function()
+    fovCircle = Drawing.new("Circle")
+    fovCircle.Filled = false
+    fovCircle.Visible = false
+    fovCircle.Color = Color3.fromRGB(120, 255, 140)
+    fovCircle.Transparency = 0.9
+    pcall(function() fovCircle.Thickness = 2 end)
+    pcall(function() fovCircle.NumSides = 48 end)
+end)
+pcall(function()
+    fovFill = Drawing.new("Circle")
+    fovFill.Filled = false
+    fovFill.Visible = false
+    fovFill.Color = Color3.fromRGB(255, 80, 80)
+    pcall(function() fovFill.Thickness = 2 end)
+    pcall(function() fovFill.NumSides = 24 end)
+    pcall(function() fovFill.Radius = 6 end)
+end)
+
+local function closestTargetInFov(maxFov, includeNpcs)
+    local best, bestDist
+    local cx, cy = mouseScreenPos()
+    local char = LocalPlayer.Character
+    for _, data in pairs(trackedObjects) do
+        local isPlayer = data.espType == "Player"
+        local isNpc = data.espType == "Entity"
+        if (isPlayer or (includeNpcs and isNpc)) and data.part and data.part.Parent and data.obj ~= char then
+            local hum
+            pcall(function()
+                hum = data.obj:FindFirstChildWhichIsA("Humanoid") or data.part.Parent:FindFirstChildWhichIsA("Humanoid")
+            end)
+            local hp = 1
+            pcall(function()
+                if hum then hp = hum.Health end
+            end)
+            if (not hum) or (hp and hp > 0) then
+                local skip = false
+                if isPlayer then
+                    local plr = Players:FindFirstChild(data.obj.Name)
+                    if plr and LocalPlayer.Team and plr.Team == LocalPlayer.Team then
+                        skip = true
+                    end
+                end
+                if not skip then
+                    local aimPart = data.part
+                    if isPlayer then
+                        pcall(function()
+                            local head = data.obj:FindFirstChild("Head")
+                            if head then aimPart = head end
+                        end)
+                    end
+                    local pos, onScreen = WorldToScreen(aimPart.Position)
+                    if onScreen then
+                        local dx, dy = pos.X - cx, pos.Y - cy
+                        local fov = math.sqrt(dx * dx + dy * dy)
+                        if fov <= maxFov and (not bestDist or fov < bestDist) then
+                            bestDist = fov
+                            best = data
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function partVelocity(part)
+    local vel = Vector3.new(0, 0, 0)
+    pcall(function()
+        vel = part.AssemblyLinearVelocity
+    end)
+    if vel.Magnitude < 0.01 then
+        pcall(function()
+            vel = part.Velocity
+        end)
+    end
+    -- Matcha can return garbage velocities on NPCs; that aims into the sky.
+    if vel.Magnitude > 90 or vel.Magnitude ~= vel.Magnitude then
+        return Vector3.new(0, 0, 0)
+    end
+    return vel
+end
+
+-- Fully charged wood_bow. Angle is solved live every frame from origin, target, and height delta dy.
+local BOW_FULL_CHARGE = 1
+local BOW_CHARGED_SPEED = 240
+local BOW_CHARGED_GRAVITY = 20
+
+local function bowStats()
+    local speed = BOW_CHARGED_SPEED * BOW_FULL_CHARGE
+    return speed, BOW_CHARGED_GRAVITY, "charged"
+end
+
+local function getShotOrigin()
+    local char = LocalPlayer.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then return hrp.Position end
+        local head = char:FindFirstChild("Head")
+        if head then return head.Position end
+    end
+    if Camera then return Camera.Position end
+    return nil
+end
+
+-- Dead-center torso. Any base offset made close shots fly over the head;
+-- range compensation comes only from the ballistic drop term.
+local function getHitPosition(part)
+    return part.Position
+end
+
+-- Single compensation: low-arc ballistic to the hit point, dy included.
+-- Recalc every call from live origin/target. Never a distance table.
+local function bowAimWorld(origin, part)
+    local speed, gravity = bowStats()
+    local hit = getHitPosition(part)
+    local vel = partVelocity(part)
+    local predicted = hit
+    local tanTheta, dx, dy, dist = 0, 0, 0, 0
+
+    for _ = 1, 4 do
+        dist = (predicted - origin).Magnitude
+        dx = Vector3.new(predicted.X - origin.X, 0, predicted.Z - origin.Z).Magnitude
+        dy = predicted.Y - origin.Y
+        if dx < 0.4 then
+            return predicted, 0, dist, dy
+        end
+
+        local v2 = speed * speed
+        local disc = v2 * v2 - gravity * (gravity * dx * dx + 2 * dy * v2)
+        if disc >= 0 then
+            -- exact low-arc angle; negative when the target is below us
+            tanTheta = (v2 - math.sqrt(disc)) / (gravity * dx)
+        else
+            tanTheta = (dy / dx) + (gravity * dx) / (2 * v2)
+        end
+        if tanTheta > 0.35 then tanTheta = 0.35 end
+        if tanTheta < -0.9 then tanTheta = -0.9 end
+
+        local cosT = 1 / math.sqrt(1 + tanTheta * tanTheta)
+        local t = dx / (speed * cosT)
+        if t < 0.02 then t = 0.02 elseif t > 2 then t = 2 end
+        predicted = hit + vel * t
+    end
+
+    local aim = Vector3.new(predicted.X, origin.Y + tanTheta * dx, predicted.Z)
+    return aim, tanTheta, dist, dy
+end
+
+local lastMove = "none"
+local lastSkip = "init"
+local lastM1 = false
+local recoverUntil = 0
+
+local function currentMousePos()
+    return mouseScreenPos()
+end
+
+local function moveMouseToScreen(sx, sy, bodyY, maxUp)
+    if not sx or not sy then
+        lastSkip = "no screen pos"
+        return false
+    end
+    if not isrbxactive() then
+        lastSkip = "roblox not focused"
+        return false
+    end
+    if Lib.IsOpen and Lib:IsOpen() then
+        lastSkip = "menu open - close with P"
+        return false
+    end
+    local mx, my = currentMousePos()
+    if bodyY and my < bodyY - 80 then
+        sy = bodyY
+    end
+    local dx = sx - mx
+    local dy = sy - my
+    if dx * dx + dy * dy < 4 then
+        lastSkip = "already on target"
+        return true
+    end
+    if dx > 22 then dx = 22 elseif dx < -22 then dx = -22 end
+    if not maxUp then maxUp = 7 end
+    if dy < -maxUp then dy = -maxUp end
+    if dy > 26 then dy = 26 end
+    pcall(setrobloxinput, true)
+    if hasMoveRel then
+        local okRel, errRel = pcall(mousemoverel, math.floor(dx + 0.5), math.floor(dy + 0.5))
+        if okRel then
+            lastMove = "rel " .. math.floor(dx) .. "," .. math.floor(dy)
+            lastSkip = "moved"
+            return true
+        end
+        lastSkip = "rel fail: " .. tostring(errRel)
+        return false
+    end
+    lastSkip = "no mousemoverel"
+    return false
+end
+
+local function aimBowCamera(part, isNpc)
+    if not part or not Camera then
+        lastSkip = "no part/camera"
+        return
+    end
+    pcall(function() Camera = Workspace.CurrentCamera end)
+
+    local origin = getShotOrigin()
+    if not origin then
+        lastSkip = "no origin"
+        return
+    end
+
+    local hit = getHitPosition(part)
+    local hitPos, hitOn = WorldToScreen(hit)
+    if not hitOn or not hitPos then
+        lastSkip = "target offscreen"
+        return
+    end
+
+    local aimWorld, tanTheta, dist, dy = bowAimWorld(origin, part)
+    local pos, onScreen = WorldToScreen(aimWorld)
+    if not onScreen or not pos then
+        pos = hitPos
+    end
+
+    local m1 = false
+    pcall(function() m1 = ismouse1() == true end)
+    if lastM1 and not m1 then
+        recoverUntil = tick() + 0.28
+    end
+    lastM1 = m1
+
+    local sx, sy = pos.X, pos.Y
+    if tick() < recoverUntil then
+        sx, sy = hitPos.X, hitPos.Y
+    end
+
+    local vs
+    pcall(function() vs = Camera.ViewportSize end)
+    if vs then
+        local top = vs.Y * 0.05
+        if sy < top then sy = top end
+        if sy > vs.Y * 0.97 then sy = vs.Y * 0.97 end
+        -- Sky safety only. Do not pin to hit Y — shooting down must aim below.
+        if hitPos.Y - sy > 42 then
+            sy = hitPos.Y - 42
+        end
+    end
+
+    lastSkip = string.format("d=%.0f dy=%.1f th=%.2f", dist or 0, dy or 0, tanTheta or 0)
+
+    if fovFill then
+        fovFill.Position = Vector2.new(sx, sy)
+        fovFill.Visible = BW.BowFovCircle == true
+    end
+    moveMouseToScreen(sx, sy, hitPos.Y, 10)
+end
+
+local function setBowDebug(a, b, c, d, e)
+    bowDbgLines[1] = a or ""
+    bowDbgLines[2] = b or ""
+    bowDbgLines[3] = c or ""
+    bowDbgLines[4] = d or ""
+    bowDbgLines[5] = e or ""
+    if dbgBox and dbgBox.SetVisible then
+        dbgBox:SetVisible(BW.BowDebug == true)
+    end
 end
 
 RunService.Heartbeat:Connect(function()
@@ -484,6 +1183,203 @@ RunService.Heartbeat:Connect(function()
         if hum then
             pcall(function() hum.WalkSpeed = BW.WalkSpeed end)
         end
+    end
+
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    Camera = Workspace.CurrentCamera
+
+    local espOn = BW.ResourceEsp or BW.NpcEsp or BW.KitEsp
+    if espOn then
+        for _, data in pairs(trackedObjects) do
+            if data.noDraw or not data.box then
+                -- combat-only track, no drawings
+            else
+                local shouldDraw = data.config and data.config.draw and data.config.draw(data.obj)
+                if not shouldDraw or not data.part or not data.part.Parent or not root then
+                    hideDraw(data)
+                else
+                    local distance = (data.part.Position - root.Position).Magnitude
+                    if distance > 500 then
+                        hideDraw(data)
+                    else
+                        local pos, onScreen = WorldToScreen(data.part.Position)
+                        if onScreen then
+                            data.box.Size = Vector2.new(22, 22)
+                            data.box.Position = Vector2.new(pos.X - 11, pos.Y - 11)
+                            data.box.Visible = true
+                            data.text.Position = Vector2.new(pos.X, pos.Y - 26)
+                            data.text.Visible = true
+                            if data.espType == "iron" or data.espType == "diamond" or data.espType == "emerald" then
+                                local amount = 1
+                                pcall(function() amount = data.obj:GetAttribute("Amount") or 1 end)
+                                data.amountText.Text = "x" .. tostring(amount)
+                                data.amountText.Position = Vector2.new(pos.X, pos.Y + 14)
+                                data.amountText.Visible = true
+                            else
+                                data.amountText.Visible = false
+                            end
+                        else
+                            hideDraw(data)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local mx, my = mouseScreenPos()
+    local showFov = BW.BowFovCircle == true and (BW.BowAimbot == true)
+    if not showFov and bowOn and bowOn.IsActivated then
+        pcall(function() showFov = BW.BowFovCircle == true and bowOn:IsActivated() end)
+    end
+    if fovCircle then
+        local radius = BW.BowAimFov or 180
+        fovCircle.Position = Vector2.new(mx, my)
+        pcall(function() fovCircle.Radius = radius end)
+        fovCircle.Visible = showFov == true
+    end
+    if fovFill and not (BW.BowAimbot or showFov) then
+        fovFill.Visible = false
+    end
+
+    local bowActive = BW.BowAimbot
+    if not bowActive and bowOn and bowOn.IsActivated then
+        pcall(function() bowActive = bowOn:IsActivated() end)
+    end
+
+    local trackN, playerN, npcN = 0, 0, 0
+    for _, data in pairs(trackedObjects) do
+        trackN = trackN + 1
+        if data.espType == "Player" then playerN = playerN + 1 end
+        if data.espType == "Entity" then npcN = npcN + 1 end
+    end
+
+    if bowActive then
+        local target = closestTargetInFov(BW.BowAimFov or 180, BW.BowTargetNpcs ~= false)
+        if target then
+            local tname = "?"
+            pcall(function() tname = tostring(target.obj.Name) end)
+            aimBowCamera(target.part, target.espType == "Entity")
+            setBowDebug(
+                "ON  abs=" .. tostring(hasMoveAbs) .. " rel=" .. tostring(hasMoveRel),
+                "target: " .. tname,
+                "tracked p:" .. playerN .. " npc:" .. npcN .. " npcs=" .. tostring(BW.BowTargetNpcs),
+                lastSkip,
+                lastMove
+            )
+        else
+            lastSkip = "no target in FOV"
+            if fovFill then fovFill.Visible = false end
+            setBowDebug(
+                "ON  abs=" .. tostring(hasMoveAbs) .. " rel=" .. tostring(hasMoveRel),
+                "target: none  mouse=" .. math.floor(mx) .. "," .. math.floor(my),
+                "tracked p:" .. playerN .. " npc:" .. npcN .. " npcs=" .. tostring(BW.BowTargetNpcs),
+                lastSkip,
+                "menu=" .. tostring(Lib.IsOpen and Lib:IsOpen() or false)
+            )
+        end
+    else
+        if fovFill then fovFill.Visible = false end
+        setBowDebug(
+            "OFF  enable toggle or hold E",
+            "abs=" .. tostring(hasMoveAbs) .. " rel=" .. tostring(hasMoveRel),
+            "tracked p:" .. playerN .. " npc:" .. npcN,
+            "rbx=" .. tostring(isrbxactive()),
+            "menu=" .. tostring(Lib.IsOpen and Lib:IsOpen() or false)
+        )
+    end
+
+    if BW.SilentBAimbot and getEquippedBow() then
+        local target = closestTargetInFov(BW.SilentBAimFov or 220, BW.BowTargetNpcs ~= false)
+        if target and ProjectileFire and root then
+            local origin = root.Position
+            local dir = (target.part.Position - origin)
+            if dir.Magnitude > 0.01 then
+                dir = dir.Unit
+                pcall(function()
+                    ProjectileFire:FireServer(getEquippedBow(), "arrow", origin, dir)
+                end)
+            end
+        elseif target and not ProjectileFire then
+            -- silent has no projectile remote on this build; do not snap the camera
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if BW.KillAura then
+            local weapon = getAttackWeapon()
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if weapon and root and SwordHitEvent then
+                local localfacing = root.CFrame.LookVector * Vector3.new(1, 0, 1)
+                local targetsList = {}
+                local range = BW.KillAuraRange or 18
+
+                for _, data in pairs(trackedObjects) do
+                    if data.part and data.part.Parent and data.obj ~= char and data.obj.Name ~= LocalPlayer.Name then
+                        local isPlayer = data.espType == "Player"
+                        local isEntity = data.espType == "Entity"
+                        if isPlayer or isEntity then
+                            local humanoid = data.part.Parent:FindFirstChildWhichIsA("Humanoid")
+                            if humanoid and humanoid.Health > 0 then
+                                local skip = false
+                                if isPlayer then
+                                    local targetPlr = Players:FindFirstChild(data.obj.Name)
+                                    if targetPlr and LocalPlayer.Team and targetPlr.Team == LocalPlayer.Team then
+                                        skip = true
+                                    end
+                                end
+                                if not skip then
+                                    local delta = data.part.Position - root.Position
+                                    local dist = delta.Magnitude
+                                    if dist <= range then
+                                        local flat = delta * Vector3.new(1, 0, 1)
+                                        if flat.Magnitude > 0.01 then
+                                            local angle = math.acos(localfacing:Dot(flat.Unit))
+                                            if angle <= math.pi then
+                                                targetsList[#targetsList + 1] = {
+                                                    instance = data.part.Parent,
+                                                    part = data.part,
+                                                    distance = dist,
+                                                }
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
+                table.sort(targetsList, function(a, b) return a.distance < b.distance end)
+
+                local targetData = targetsList[1]
+                if targetData then
+                    local dir = (targetData.part.Position - root.Position)
+                    if dir.Magnitude > 0.01 then
+                        dir = dir.Unit
+                    end
+                    local pos = root.Position + dir * math.max(targetData.distance - 14.399, 0)
+                    pcall(function()
+                        SwordHitEvent:FireServer({
+                            chargedAttack = { chargeRatio = 0 },
+                            entityInstance = targetData.instance,
+                            validate = {
+                                selfPosition = { value = pos },
+                                targetPosition = { value = targetData.part.Position },
+                            },
+                            weapon = weapon,
+                        })
+                    end)
+                end
+            elseif BW.KillAura and not SwordHitEvent then
+                refreshRemotes()
+            end
+        end
+        task.wait(0.05)
     end
 end)
 
