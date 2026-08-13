@@ -423,9 +423,9 @@
     -- what the feature poll actually reads.
     local function chipKey(handle, key)
         pcall(function()
-            if handle and handle.keyHandle and key and key ~= "" then
-                handle.keyHandle:Set(key)
-            end
+        if handle and handle.keyHandle then
+            handle.keyHandle:Set(key)
+        end
         end)
     end
     local binds = win:SettingsSection("Keybinds", "Left")
