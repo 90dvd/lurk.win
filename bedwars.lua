@@ -299,7 +299,7 @@
     plist:Toggle("Auto refresh", BW.AutoRefresh, function(on) BW.AutoRefresh = on end, "repopulate as players join or leave")
 
     local ptrack = wPlayers:Section("Tracking", "Right")
-    ptrack:Toggle("Track nearest", BW.TrackNearest, function(on) BW.TrackNearest = on end):AddKeybind("y", "Toggle")
+    local trackToggle = ptrack:Toggle("Track nearest", BW.TrackNearest, function(on) BW.TrackNearest = on end):AddKeybind("y", "Toggle")
     ptrack:Toggle("Off-screen arrows", BW.OffscreenArrows, function(on) BW.OffscreenArrows = on end)
     ptrack:Colorpicker("Friend color", Color3.fromRGB(120, 255, 140))
     ptrack:Colorpicker("Enemy color", Color3.fromRGB(255, 110, 110))
@@ -416,6 +416,24 @@
         Lib:Notify("Streamer", on and "on" or "off", 1.5)
     end)
     mine:Slider("UI scale", 100, 5, 50, 150, "%", function(v) end)
+
+    -- Standalone keybind rows. Their values live in the config FLAGS (like the
+    -- menu key), so they reliably save/load with configs, and on change or
+    -- config load they push the key into the toggle's keybind chip, which is
+    -- what the feature poll actually reads.
+    local function chipKey(handle, key)
+        pcall(function()
+            if handle and handle.keyHandle and key and key ~= "" then
+                handle.keyHandle:Set(key)
+            end
+        end)
+    end
+    local binds = win:SettingsSection("Keybinds", "Left")
+    binds:Keybind("Bow Aimbot", "e", function(k) chipKey(bowOn, k) end)
+    binds:Keybind("Kill Aura", "q", function(k) chipKey(kaToggle, k) end)
+    binds:Keybind("Silent B-Aimbot", "r", function(k) chipKey(silentOn, k) end)
+    binds:Keybind("Fly", "g", function(k) chipKey(fly, k) end)
+    binds:Keybind("Track nearest", "y", function(k) chipKey(trackToggle, k) end)
 
     --------------------------------------------------------------------------
     -- Floating stats
