@@ -103,11 +103,10 @@
     def(BW, "BowFovCircle", true)
     def(BW, "BowDebug", true)
     def(BW, "BowTargetNpcs", true)
+    def(BW, "BowVisibleCheck", false)
     def(BW, "BowSmoothness", 1)
     def(BW, "BowSpeed", 240)
     def(BW, "BowGravity", 50)
-    def(BW, "SilentBAimbot", false)
-    def(BW, "SilentBAimFov", 220)
     def(BW, "ResourceEsp", false)
     def(BW, "EspIron", true)
     def(BW, "EspDiamonds", true)
@@ -211,38 +210,9 @@
     bow:Toggle("Target NPCs", BW.BowTargetNpcs, function(on)
         BW.BowTargetNpcs = on
     end, "also lock onto Dim Guards, Titans, Bhaa - no Matcha NPC register needed")
-
-    local silent = combat:Section("Silent B-Aimbot", "Right", "silent bow aim, no visible snap")
-    local silentOn
-    silentOn = silent:Toggle("Enabled", BW.SilentBAimbot, function(on)
-        if on and not _G.hybrid then
-            BW.SilentBAimbot = false
-            if silentOn then silentOn:Set(false) end
-            Lib:Notify("Silent B-Aimbot", "needs Matcha hybrid mode - set _G.hybrid = true before inject", 5, "warning")
-            return
-        end
-        BW.SilentBAimbot = on
-        if on then
-            Lib:Notify("Silent B-Aimbot", "on", 2, "success")
-        else
-            Lib:Notify("Silent B-Aimbot", "off", 1.5, "warning")
-        end
-    end)
-    silentOn:AddKeybind("r", "Toggle", function(on)
-        if on and not _G.hybrid then
-            BW.SilentBAimbot = false
-            if silentOn then silentOn:Set(false) end
-            Lib:Notify("Silent B-Aimbot", "needs Matcha hybrid mode - set _G.hybrid = true before inject", 5, "warning")
-            return
-        end
-        BW.SilentBAimbot = on
-        if on then
-            Lib:Notify("Silent B-Aimbot", "on", 2, "success")
-        else
-            Lib:Notify("Silent B-Aimbot", "off", 1, "warning")
-        end
-    end)
-    silent:Slider("FOV", BW.SilentBAimFov, 1, 20, 500, "px", function(v) BW.SilentBAimFov = v end)
+    bow:Toggle("Visible check", BW.BowVisibleCheck, function(on)
+        BW.BowVisibleCheck = on
+    end, "skip targets behind blocks - Matcha has no raycast, so map parts are scanned as boxes; characters never block")
 
     --------------------------------------------------------------------------
     -- VISUALS
@@ -431,7 +401,6 @@
     local binds = win:SettingsSection("Keybinds", "Left")
     binds:Keybind("Bow Aimbot", "e", function(k) chipKey(bowOn, k) end)
     binds:Keybind("Kill Aura", "q", function(k) chipKey(kaToggle, k) end)
-    binds:Keybind("Silent B-Aimbot", "r", function(k) chipKey(silentOn, k) end)
     binds:Keybind("Fly", "g", function(k) chipKey(fly, k) end)
     binds:Keybind("Track nearest", "y", function(k) chipKey(trackToggle, k) end)
 
@@ -623,7 +592,7 @@
             getTarget = function(obj) return getModelRoot(obj) end,
             text = function(obj) return obj.Name end,
             color = Color3.fromRGB(255, 255, 255),
-            enabled = function() return BW.KillAura or BW.BowAimbot or BW.SilentBAimbot end,
+            enabled = function() return BW.KillAura or BW.BowAimbot end,
             draw = function() return false end,
         },
         Entity = {
@@ -631,7 +600,7 @@
             getTarget = function(obj) return getModelRoot(obj) end,
             text = function(obj) return obj.Name end,
             color = Color3.fromRGB(255, 100, 100),
-            enabled = function() return BW.KillAura or BW.NpcEsp or BW.BowAimbot or BW.SilentBAimbot end,
+            enabled = function() return BW.KillAura or BW.NpcEsp or BW.BowAimbot end,
             draw = function(obj)
                 if not BW.NpcEsp then return false end
                 local kind = npcKind(obj)
@@ -863,7 +832,7 @@
 
     task.spawn(function()
         while true do
-            local needCombat = BW.KillAura or BW.BowAimbot or BW.SilentBAimbot
+            local needCombat = BW.KillAura or BW.BowAimbot
             pcall(function()
                 if not needCombat and bowOn and bowOn.IsActivated then
                     needCombat = bowOn:IsActivated() == true
@@ -982,8 +951,128 @@
         pcall(function() fovFill.Radius = 6 end)
     end)
 
+    -- Matcha exposes no raycast API, so visibility is checked geometrically:
+    -- collidable map parts are cached as axis-aligned boxes (Position +- Size/2,
+    -- rotation ignored) and tested with a slab ray/box intersection. Models with
+    -- a Humanoid are skipped during collection, so characters never block.
+    local blockerBoxes = {}
+    local visBlockedN = 0
+
+    local function rayHitsBlocker(ox, oy, oz, tx, ty, tz)
+        local dx, dy, dz = tx - ox, ty - oy, tz - oz
+        local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if dist < 2 then return false end
+        local idx = math.abs(dx) > 1e-8 and 1 / dx or 1e8
+        local idy = math.abs(dy) > 1e-8 and 1 / dy or 1e8
+        local idz = math.abs(dz) > 1e-8 and 1 / dz or 1e8
+        local maxT = dist - 1.5
+        for i = 1, #blockerBoxes do
+            local b = blockerBoxes[i]
+            local t1 = (b[1] - ox) * idx
+            local t2 = (b[4] - ox) * idx
+            local tmin = math.min(t1, t2)
+            local tmax = math.max(t1, t2)
+            t1 = (b[2] - oy) * idy
+            t2 = (b[5] - oy) * idy
+            tmin = math.max(tmin, math.min(t1, t2))
+            tmax = math.min(tmax, math.max(t1, t2))
+            t1 = (b[3] - oz) * idz
+            t2 = (b[6] - oz) * idz
+            tmin = math.max(tmin, math.min(t1, t2))
+            tmax = math.min(tmax, math.max(t1, t2))
+            if tmax >= tmin and tmin > 0.1 and tmin <= maxT then
+                return true
+            end
+        end
+        return false
+    end
+
+    local function rebuildBlockers()
+        local rootPos
+        pcall(function()
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then rootPos = hrp.Position end
+        end)
+        if not rootPos then
+            blockerBoxes = {}
+            return
+        end
+        local char = LocalPlayer.Character
+        local out = {}
+        local budget = { 200000 }
+        local function walk(node, depth)
+            if depth < 0 or budget[1] <= 0 then return end
+            local ok, kids = pcall(function() return node:GetChildren() end)
+            if not ok or not kids then return end
+            for i = 1, #kids do
+                if budget[1] <= 0 then return end
+                budget[1] = budget[1] - 1
+                local obj = kids[i]
+                if obj and obj ~= char then
+                    local cn = obj.ClassName
+                    if cn == "Part" or cn == "MeshPart" or cn == "UnionOperation" or cn == "WedgePart" or cn == "CornerWedgePart" then
+                        local cc, tr, pos, size
+                        pcall(function()
+                            cc = obj.CanCollide
+                            tr = obj.Transparency
+                            pos = obj.Position
+                            size = obj.Size
+                        end)
+                        if cc == true and tr and tr < 0.9 and pos and size
+                            and size.X < 250 and size.Y < 100 and size.Z < 250
+                            and math.abs(pos.X - rootPos.X) < 350
+                            and math.abs(pos.Z - rootPos.Z) < 350
+                            and math.abs(pos.Y - rootPos.Y) < 150 then
+                            local hx, hy, hz = size.X * 0.5, size.Y * 0.5, size.Z * 0.5
+                            out[#out + 1] = { pos.X - hx, pos.Y - hy, pos.Z - hz, pos.X + hx, pos.Y + hy, pos.Z + hz }
+                        end
+                    elseif cn == "Model" then
+                        local hum
+                        pcall(function() hum = obj:FindFirstChild("Humanoid") end)
+                        if not hum then walk(obj, depth - 1) end
+                    elseif cn == "Folder" or cn == "Configuration" then
+                        walk(obj, depth - 1)
+                    end
+                end
+            end
+        end
+        pcall(walk, Workspace, 12)
+        blockerBoxes = out
+    end
+
+    task.spawn(function()
+        while true do
+            local on = BW.BowVisibleCheck == true and BW.BowAimbot == true
+            if not on and BW.BowVisibleCheck and bowOn and bowOn.IsActivated then
+                pcall(function() on = bowOn:IsActivated() == true end)
+            end
+            if on then
+                -- Only rescan while a bow is actually equipped; the walk visits
+                -- most of the map and would otherwise hitch for nothing.
+                local armed = false
+                pcall(function() armed = getEquippedBow() ~= nil end)
+                if armed then pcall(rebuildBlockers) end
+            end
+            task.wait(2.5)
+        end
+    end)
+
+    local function targetVisible(data, aimPos, origin)
+        local now = tick()
+        if data.visAt and now - data.visAt < 0.15 then
+            return data.visOk == true
+        end
+        local ok = not rayHitsBlocker(origin.X, origin.Y, origin.Z, aimPos.X, aimPos.Y, aimPos.Z)
+        data.visAt = now
+        data.visOk = ok
+        return ok
+    end
+
     local function closestTargetInFov(maxFov, includeNpcs)
         local best, bestDist
+        local cands, candN = nil, 0
+        local visOn = BW.BowVisibleCheck == true
         local cx, cy = mouseScreenPos()
         local char = LocalPlayer.Character
         for _, data in pairs(trackedObjects) do
@@ -1018,16 +1107,39 @@
                         if onScreen then
                             local dx, dy = pos.X - cx, pos.Y - cy
                             local fov = math.sqrt(dx * dx + dy * dy)
-                            if fov <= maxFov and (not bestDist or fov < bestDist) then
-                                bestDist = fov
-                                best = data
+                            if fov <= maxFov then
+                                if visOn then
+                                    candN = candN + 1
+                                    if not cands then cands = {} end
+                                    cands[candN] = { data = data, pos = aimPart.Position, fov = fov }
+                                elseif not bestDist or fov < bestDist then
+                                    bestDist = fov
+                                    best = data
+                                end
                             end
                         end
                     end
                 end
             end
         end
-        return best
+        if not visOn then return best end
+        visBlockedN = 0
+        if candN == 0 then return nil end
+        table.sort(cands, function(a, b) return a.fov < b.fov end)
+        local origin
+        pcall(function()
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then origin = hrp.Position end
+        end)
+        if not origin then return cands[1].data end
+        for i = 1, math.min(candN, 5) do
+            local c = cands[i]
+            if targetVisible(c.data, c.pos, origin) then
+                return c.data
+            end
+            visBlockedN = visBlockedN + 1
+        end
+        return nil
     end
 
     local function partVelocity(part)
@@ -1235,8 +1347,6 @@
     local lastAimDist = 0
     local lastAimAt = 0
     local lastShotInfo = nil -- { t, aimTan, dist } set when mouse1 is released
-    local silentNextFire = 0
-    local silentFails = 0
 
     local function currentMousePos()
         return mouseScreenPos()
@@ -1493,7 +1603,7 @@
     task.spawn(function()
         local prevM1 = false
         while true do
-            local active = BW.BowAimbot or BW.SilentBAimbot
+            local active = BW.BowAimbot
             if not active and bowOn and bowOn.IsActivated then
                 pcall(function() active = bowOn:IsActivated() end)
             end
@@ -1660,7 +1770,11 @@
                     "tracked p:" .. playerN .. " npc:" .. npcN .. " npcs=" .. tostring(BW.BowTargetNpcs)
                 )
             else
-                lastSkip = "no target in FOV"
+                if BW.BowVisibleCheck and visBlockedN > 0 then
+                    lastSkip = "blocked by map x" .. visBlockedN .. " (" .. #blockerBoxes .. " boxes)"
+                else
+                    lastSkip = "no target in FOV"
+                end
                 if fovFill then fovFill.Visible = false end
                 setBowDebug(
                     "ON  abs=" .. tostring(hasMoveAbs) .. " rel=" .. tostring(hasMoveRel),
@@ -1681,32 +1795,6 @@
             )
         end
 
-        if BW.SilentBAimbot and getEquippedBow() then
-            -- Matcha logs "FireServer requires hybrid mode" instead of raising a
-            -- Lua error, so pcall can't detect the failure. Gate on _G.hybrid
-            -- (set by the user in the inject snippet) and never fire without it.
-            if not _G.hybrid then
-                BW.SilentBAimbot = false
-                pcall(function()
-                    Lib:Notify("Silent B-Aimbot", "disabled - set _G.hybrid = true before inject (Matcha hybrid mode)", 5, "warning")
-                end)
-            else
-                local target = closestTargetInFov(BW.SilentBAimFov or 220, BW.BowTargetNpcs ~= false)
-                if target and ProjectileFire and root and tick() >= silentNextFire then
-                    silentNextFire = tick() + 0.25
-                    local origin = root.Position
-                    local dir = (target.part.Position - origin)
-                    if dir.Magnitude > 0.01 then
-                        dir = dir.Unit
-                        pcall(function()
-                            ProjectileFire:FireServer(getEquippedBow(), "arrow", origin, dir)
-                        end)
-                    end
-                elseif target and not ProjectileFire then
-                    -- silent has no projectile remote on this build; do not snap the camera
-                end
-            end
-        end
     end
 
     -- RenderStepped fires right before the frame is drawn, so ESP boxes are
