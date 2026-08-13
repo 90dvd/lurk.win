@@ -417,11 +417,6 @@
     end)
     mine:Slider("UI scale", 100, 5, 50, 150, "%", function(v) end)
 
-    -- Apply the saved config (toggles, sliders AND keybinds) as soon as the UI
-    -- is fully built. Without this the saved config only came back after a
-    -- manual Load in the Settings tab, so rebound keys looked "not saved".
-    pcall(function() win:autoloadConfig() end)
-
     --------------------------------------------------------------------------
     -- Floating stats
     --------------------------------------------------------------------------
