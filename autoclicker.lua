@@ -7,9 +7,11 @@
 
     Bedienung:
       1. "General" einschalten.
-      2. CPS mit dem Slider einstellen.
+      2. Mit Min- und Max-Slider eine CPS-Spanne von 1 bis 100 wählen.
+         Jeder Klick bekommt eine zufällige Rate dazwischen.
       3. Auf das Keybind-Feld klicken und eine Taste drücken.
       4. Die gewählte Taste schaltet den Autoclicker an/aus.
+      5. P blendet dieses Fenster ein und aus.
 
     Wichtig:
       Der Autoclicker klickt nur, wenn General UND Keybind-Status aktiv sind.
@@ -27,27 +29,26 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
--- Konfiguration
 local MIN_CPS = 1
-local MAX_CPS = 20
-local cps = 10
-local bindKey = 0x75 -- F6 (Windows Virtual-Key-Code)
+local MAX_CPS = 100
+local cpsMin = 8
+local cpsMax = 14
+local bindKey = 0x75 -- F6
+local UI_KEY = 0x50 -- P
 
--- Laufzeitstatus
 local alive = true
+local uiVisible = true
 local generalEnabled = false
 local bindEnabled = false
 local listeningForBind = false
 local draggingWindow = false
-local draggingSlider = false
+local draggingWhich = nil -- "min" oder "max"
 local injectingClick = false
 
--- Fensterposition und -größe
-local windowX, windowY = 160, 160
-local windowW, windowH = 340, 218
+local windowX, windowY = 160, 120
+local windowW, windowH = 400, 318
 local dragOffsetX, dragOffsetY = 0, 0
 
--- Farben
 local COLOR_BG = Color3.fromRGB(18, 20, 26)
 local COLOR_PANEL = Color3.fromRGB(26, 29, 38)
 local COLOR_ROW = Color3.fromRGB(34, 38, 49)
@@ -65,11 +66,11 @@ local function clamp(value, minimum, maximum)
     return value
 end
 
-local function inside(px, py, x, y, w, h)
-    return px >= x and px <= x + w and py >= y and py <= y + h
+local function inside(px, py, rect)
+    return px >= rect[1] and px <= rect[1] + rect[3]
+        and py >= rect[2] and py <= rect[2] + rect[4]
 end
 
--- Lesbare Namen für häufig verwendete Windows-VK-Codes.
 local KEY_NAMES = {
     [0x08] = "BACKSPACE", [0x09] = "TAB", [0x0D] = "ENTER",
     [0x10] = "SHIFT", [0x11] = "CTRL", [0x12] = "ALT",
@@ -92,7 +93,11 @@ local function keyName(vk)
     return "VK " .. tostring(vk)
 end
 
--- Drawing-Helfer
+-- Matcha liefert keine Textbreite. System-Schrift ist ungefähr so breit.
+local function textWidth(value, size)
+    return #tostring(value) * (size or 13) * 0.62
+end
+
 local drawings = {}
 
 local function register(object)
@@ -107,7 +112,7 @@ local function square(color, z)
     object.Transparency = 1
     object.ZIndex = z or 1
     object.Visible = true
-    pcall(function() object.Corner = 6 end)
+    pcall(function() object.Corner = 8 end)
     return object
 end
 
@@ -115,7 +120,7 @@ local function text(value, color, size, z)
     local object = register(Drawing.new("Text"))
     object.Text = value
     object.Color = color
-    -- Matcha Text uses Size as the font size. FontSize is rejected.
+    -- Matcha Text.Size ist die Schriftgröße. FontSize existiert hier nicht.
     object.Size = size or 13
     object.Outline = false
     object.Center = false
@@ -136,36 +141,42 @@ local function circle(color, z)
     return object
 end
 
--- UI-Elemente
 local shadow = square(Color3.fromRGB(8, 9, 12), 1)
 shadow.Transparency = 0.55
 local background = square(COLOR_BG, 2)
 local header = square(COLOR_PANEL, 3)
 local title = text("MATCHA AUTOCLICKER", COLOR_TEXT, 15, 5)
-local subtitle = text("Simple / external input", COLOR_MUTED, 11, 5)
+local subtitle = text("P toggles this window", COLOR_MUTED, 11, 5)
 local closeButton = square(COLOR_ROW, 4)
-local closeText = text("X", COLOR_MUTED, 13, 5)
+local closeText = text("X", COLOR_MUTED, 13, 6)
+closeText.Center = true
 
 local generalRow = square(COLOR_ROW, 3)
-local generalLabel = text("General", COLOR_TEXT, 13, 5)
-local generalHint = text("Master switch", COLOR_MUTED, 10, 5)
+local generalLabel = text("General", COLOR_TEXT, 14, 5)
+local generalHint = text("Master switch", COLOR_MUTED, 11, 5)
 local generalSwitch = square(COLOR_TRACK, 4)
 local generalKnob = circle(COLOR_TEXT, 5)
 
-local sliderLabel = text("Clicks per second", COLOR_TEXT, 13, 5)
-local sliderValue = text("", COLOR_ACCENT, 13, 5)
-local sliderTrack = square(COLOR_TRACK, 3)
-local sliderFill = square(COLOR_ACCENT, 4)
-local sliderKnob = circle(COLOR_TEXT, 5)
+local minLabel = text("Min CPS", COLOR_TEXT, 13, 5)
+local minValue = text("8", COLOR_ACCENT, 13, 5)
+local minTrack = square(COLOR_TRACK, 3)
+local minFill = square(COLOR_ACCENT, 4)
+local minKnob = circle(COLOR_TEXT, 5)
 
-local bindLabel = text("Toggle key", COLOR_TEXT, 13, 5)
+local maxLabel = text("Max CPS", COLOR_TEXT, 13, 5)
+local maxValue = text("14", COLOR_ACCENT, 13, 5)
+local maxTrack = square(COLOR_TRACK, 3)
+local maxFill = square(COLOR_ACCENT, 4)
+local maxKnob = circle(COLOR_TEXT, 5)
+
+local bindLabel = text("Toggle key", COLOR_TEXT, 14, 5)
 local bindButton = square(COLOR_ROW, 3)
-local bindText = text("", COLOR_TEXT, 12, 5)
+local bindText = text("F6", COLOR_TEXT, 13, 6)
 bindText.Center = true
 
 local statusDot = circle(COLOR_RED, 5)
-local statusText = text("DISABLED", COLOR_MUTED, 11, 5)
-local footerText = text("General must be enabled before the bind works", COLOR_MUTED, 10, 5)
+local statusText = text("DISABLED", COLOR_MUTED, 12, 5)
+local footerText = text("Random CPS between min and max", COLOR_MUTED, 11, 5)
 
 local function removeDrawings()
     for i = 1, #drawings do
@@ -192,64 +203,109 @@ pcall(function()
 end)
 
 local function setPosition(object, x, y)
-    object.Position = Vector2.new(x, y)
+    object.Position = Vector2.new(math.floor(x + 0.5), math.floor(y + 0.5))
 end
 
 local function setSize(object, w, h)
-    object.Size = Vector2.new(w, h)
+    object.Size = Vector2.new(math.max(1, math.floor(w + 0.5)), math.max(1, math.floor(h + 0.5)))
 end
 
--- Aktualisiert Positionen, Texte und Farben der gesamten Drawing-UI.
+-- Ein Layout für Zeichnen und Klicks, damit Hitboxen an den Formen bleiben.
+local function metrics()
+    local x, y, w = windowX, windowY, windowW
+    local pad = 16
+    local trackX = x + pad
+    local trackW = w - pad * 2
+    local generalY = y + 64
+    local generalH = 48
+    local minLabelY = generalY + generalH + 16
+    local minTrackY = minLabelY + 24
+    local maxLabelY = minTrackY + 28
+    local maxTrackY = maxLabelY + 24
+    local bindY = maxTrackY + 28
+    local bindH = 34
+    local footY = bindY + bindH + 16
+    return {
+        close = { x + w - pad - 28, y + 12, 28, 28 },
+        header = { x, y, w, 54 },
+        general = { x + 14, generalY, w - 28, generalH },
+        switch = { x + w - pad - 46, generalY + (generalH - 22) / 2, 46, 22 },
+        minTrack = { trackX, minTrackY, trackW, 6 },
+        minHit = { trackX - 10, minTrackY - 12, trackW + 20, 30 },
+        maxTrack = { trackX, maxTrackY, trackW, 6 },
+        maxHit = { trackX - 10, maxTrackY - 12, trackW + 20, 30 },
+        bind = { x + w - pad - 118, bindY, 118, bindH },
+        minLabelY = minLabelY,
+        maxLabelY = maxLabelY,
+        bindY = bindY,
+        footY = footY,
+    }
+end
+
+local function fraction(value)
+    return (value - MIN_CPS) / (MAX_CPS - MIN_CPS)
+end
+
+local function cpsFromMouse(mx, track)
+    local f = clamp((mx - track[1]) / track[3], 0, 1)
+    return math.floor(MIN_CPS + f * (MAX_CPS - MIN_CPS) + 0.5)
+end
+
+local function drawSlider(trackObj, fillObj, knobObj, track, value)
+    local f = fraction(value)
+    setPosition(trackObj, track[1], track[2])
+    setSize(trackObj, track[3], track[4])
+    setPosition(fillObj, track[1], track[2])
+    setSize(fillObj, math.max(2, track[3] * f), track[4])
+    knobObj.Radius = 7
+    -- Circle.Position ist die Mitte.
+    setPosition(knobObj, track[1] + track[3] * f, track[2] + track[4] / 2)
+end
+
 local function render()
-    setPosition(shadow, windowX + 6, windowY + 7)
+    local m = metrics()
+    local show = uiVisible
+
+    setPosition(shadow, windowX + 6, windowY + 8)
     setSize(shadow, windowW, windowH)
     setPosition(background, windowX, windowY)
     setSize(background, windowW, windowH)
-    setPosition(header, windowX, windowY)
-    setSize(header, windowW, 49)
+    setPosition(header, m.header[1], m.header[2])
+    setSize(header, m.header[3], m.header[4])
 
     setPosition(title, windowX + 16, windowY + 10)
-    setPosition(subtitle, windowX + 16, windowY + 29)
-    setPosition(closeButton, windowX + windowW - 36, windowY + 11)
-    setSize(closeButton, 24, 24)
-    setPosition(closeText, windowX + windowW - 28, windowY + 15)
+    setPosition(subtitle, windowX + 16, windowY + 30)
+    setPosition(closeButton, m.close[1], m.close[2])
+    setSize(closeButton, m.close[3], m.close[4])
+    setPosition(closeText, m.close[1] + m.close[3] / 2, m.close[2] + 6)
 
-    setPosition(generalRow, windowX + 14, windowY + 60)
-    setSize(generalRow, windowW - 28, 45)
-    setPosition(generalLabel, windowX + 26, windowY + 68)
-    setPosition(generalHint, windowX + 26, windowY + 86)
-    setPosition(generalSwitch, windowX + windowW - 69, windowY + 70)
-    setSize(generalSwitch, 42, 22)
+    setPosition(generalRow, m.general[1], m.general[2])
+    setSize(generalRow, m.general[3], m.general[4])
+    setPosition(generalLabel, windowX + 28, m.general[2] + 8)
+    setPosition(generalHint, windowX + 28, m.general[2] + 26)
+    setPosition(generalSwitch, m.switch[1], m.switch[2])
+    setSize(generalSwitch, m.switch[3], m.switch[4])
     generalSwitch.Color = generalEnabled and COLOR_ACCENT or COLOR_TRACK
     generalKnob.Radius = 8
-    setPosition(generalKnob, windowX + windowW - (generalEnabled and 38 or 58), windowY + 81)
+    local knobX = generalEnabled and (m.switch[1] + m.switch[3] - 12) or (m.switch[1] + 12)
+    setPosition(generalKnob, knobX, m.switch[2] + m.switch[4] / 2)
 
-    setPosition(sliderLabel, windowX + 18, windowY + 118)
-    sliderValue.Text = string.format("%.1f CPS", cps)
-    setPosition(sliderValue, windowX + windowW - 68, windowY + 118)
+    minValue.Text = tostring(cpsMin)
+    setPosition(minLabel, windowX + 16, m.minLabelY)
+    setPosition(minValue, windowX + windowW - 16 - textWidth(minValue.Text, 13), m.minLabelY)
+    drawSlider(minTrack, minFill, minKnob, m.minTrack, cpsMin)
 
-    local trackX = windowX + 18
-    local trackY = windowY + 145
-    local trackW = windowW - 36
-    local fraction = (cps - MIN_CPS) / (MAX_CPS - MIN_CPS)
-    setPosition(sliderTrack, trackX, trackY)
-    setSize(sliderTrack, trackW, 5)
-    setPosition(sliderFill, trackX, trackY)
-    setSize(sliderFill, math.max(2, trackW * fraction), 5)
-    sliderKnob.Radius = 7
-    setPosition(sliderKnob, trackX + trackW * fraction, trackY + 2)
+    maxValue.Text = tostring(cpsMax)
+    setPosition(maxLabel, windowX + 16, m.maxLabelY)
+    setPosition(maxValue, windowX + windowW - 16 - textWidth(maxValue.Text, 13), m.maxLabelY)
+    drawSlider(maxTrack, maxFill, maxKnob, m.maxTrack, cpsMax)
 
-    setPosition(bindLabel, windowX + 18, windowY + 166)
-    setPosition(bindButton, windowX + windowW - 117, windowY + 160)
-    setSize(bindButton, 99, 28)
+    setPosition(bindLabel, windowX + 16, m.bindY + 8)
+    setPosition(bindButton, m.bind[1], m.bind[2])
+    setSize(bindButton, m.bind[3], m.bind[4])
     bindButton.Color = listeningForBind and COLOR_ACCENT_DIM or COLOR_ROW
     bindText.Text = listeningForBind and "PRESS A KEY" or keyName(bindKey)
-    setPosition(bindText, windowX + windowW - 67, windowY + 167)
-
-    setPosition(statusDot, windowX + 21, windowY + 204)
-    statusDot.Radius = 4
-    setPosition(statusText, windowX + 32, windowY + 197)
-    setPosition(footerText, windowX + 110, windowY + 198)
+    setPosition(bindText, m.bind[1] + m.bind[3] / 2, m.bind[2] + 9)
 
     if generalEnabled and bindEnabled then
         statusDot.Color = COLOR_GREEN
@@ -264,49 +320,73 @@ local function render()
         statusText.Color = COLOR_MUTED
         statusText.Text = "DISABLED"
     end
+
+    setPosition(statusDot, windowX + 22, m.footY + 7)
+    statusDot.Radius = 4
+    setPosition(statusText, windowX + 34, m.footY)
+    setPosition(footerText, windowX + 34 + textWidth(statusText.Text, 12) + 14, m.footY + 1)
+
+    for i = 1, #drawings do
+        drawings[i].Visible = show
+    end
 end
 
 local function pointerOverWindow(mx, my)
-    return inside(mx, my, windowX, windowY, windowW, windowH)
+    if not uiVisible then return false end
+    return mx >= windowX and mx <= windowX + windowW
+        and my >= windowY and my <= windowY + windowH
 end
 
-local function updateCpsFromMouse(mx)
-    local trackX = windowX + 18
-    local trackW = windowW - 36
-    local fraction = clamp((mx - trackX) / trackW, 0, 1)
-    -- 0,1-CPS-Schritte ergeben einen praktisch stufenlosen Slider.
-    cps = math.floor((MIN_CPS + fraction * (MAX_CPS - MIN_CPS)) * 10 + 0.5) / 10
-end
-
--- Eine kleine Whitelist vermeidet Sondertasten und Maustasten als Bind.
 local function allowedBind(vk)
-    if vk >= 0x30 and vk <= 0x39 then return true end -- 0-9
-    if vk >= 0x41 and vk <= 0x5A then return true end -- A-Z
-    if vk >= 0x60 and vk <= 0x69 then return true end -- Numpad 0-9
-    if vk >= 0x70 and vk <= 0x7B then return true end -- F1-F12
+    if vk == UI_KEY then return false end
+    if vk >= 0x30 and vk <= 0x39 then return true end
+    if vk >= 0x41 and vk <= 0x5A then return true end
+    if vk >= 0x60 and vk <= 0x69 then return true end
+    if vk >= 0x70 and vk <= 0x7B then return true end
     return vk == 0x09 or vk == 0x20 or (vk >= 0x21 and vk <= 0x28)
         or vk == 0x2D or vk == 0x2E
 end
 
--- UI-/Input-Thread
+local function randomInterval()
+    local lo, hi = cpsMin, cpsMax
+    if hi < lo then lo, hi = hi, lo end
+    local rate = lo
+    if hi > lo then
+        rate = lo + math.random() * (hi - lo)
+    end
+    if rate < 1 then rate = 1 end
+    return 1 / rate
+end
+
 task.spawn(function()
     local lastMouseDown = false
+    local lastUiKey = false
     local captureStartedAt = 0
 
     while alive do
         local mx, my = Mouse.X, Mouse.Y
         local mouseDown = false
         pcall(function() mouseDown = ismouse1pressed() == true end)
-
-        -- Die von mouse1click() erzeugten Klicks dürfen die UI nicht bedienen.
         if injectingClick then mouseDown = false end
         local mousePressed = mouseDown and not lastMouseDown
 
-        if listeningForBind then
-            -- Kurze Pause nach dem Klick auf den Button verhindert Fehleingaben.
+        local uiKey = false
+        pcall(function() uiKey = iskeypressed(UI_KEY) == true end)
+        local rbxOn = false
+        pcall(function() rbxOn = isrbxactive() == true end)
+        if uiKey and not lastUiKey and rbxOn then
+            uiVisible = not uiVisible
+            if not uiVisible then
+                draggingWindow = false
+                draggingWhich = nil
+                listeningForBind = false
+            end
+        end
+        lastUiKey = uiKey
+
+        if uiVisible and listeningForBind then
             if tick() - captureStartedAt > 0.15 then
                 if iskeypressed(0x1B) then
-                    -- ESC entfernt den Bind.
                     bindKey = nil
                     bindEnabled = false
                     listeningForBind = false
@@ -323,23 +403,25 @@ task.spawn(function()
             end
         end
 
-        if mousePressed and not listeningForBind then
-            if inside(mx, my, windowX + windowW - 36, windowY + 11, 24, 24) then
+        if uiVisible and mousePressed and not listeningForBind then
+            local m = metrics()
+            if inside(mx, my, m.close) then
                 unload()
                 break
-            elseif inside(mx, my, windowX, windowY, windowW, 49) then
+            elseif inside(mx, my, m.header) then
                 draggingWindow = true
                 dragOffsetX = mx - windowX
                 dragOffsetY = my - windowY
-            elseif inside(mx, my, windowX + 14, windowY + 60, windowW - 28, 45) then
+            elseif inside(mx, my, m.general) then
                 generalEnabled = not generalEnabled
-                if not generalEnabled then
-                    bindEnabled = false
-                end
-            elseif inside(mx, my, windowX + 12, windowY + 136, windowW - 24, 26) then
-                draggingSlider = true
-                updateCpsFromMouse(mx)
-            elseif inside(mx, my, windowX + windowW - 117, windowY + 160, 99, 28) then
+                if not generalEnabled then bindEnabled = false end
+            elseif inside(mx, my, m.minHit) then
+                draggingWhich = "min"
+                cpsMin = math.min(cpsFromMouse(mx, m.minTrack), cpsMax)
+            elseif inside(mx, my, m.maxHit) then
+                draggingWhich = "max"
+                cpsMax = math.max(cpsFromMouse(mx, m.maxTrack), cpsMin)
+            elseif inside(mx, my, m.bind) then
                 listeningForBind = true
                 bindEnabled = false
                 captureStartedAt = tick()
@@ -353,10 +435,15 @@ task.spawn(function()
             draggingWindow = false
         end
 
-        if mouseDown and draggingSlider then
-            updateCpsFromMouse(mx)
+        if mouseDown and draggingWhich then
+            local m = metrics()
+            if draggingWhich == "min" then
+                cpsMin = math.min(cpsFromMouse(mx, m.minTrack), cpsMax)
+            else
+                cpsMax = math.max(cpsFromMouse(mx, m.maxTrack), cpsMin)
+            end
         elseif not mouseDown then
-            draggingSlider = false
+            draggingWhich = nil
         end
 
         render()
@@ -365,7 +452,6 @@ task.spawn(function()
     end
 end)
 
--- Keybind- und Click-Thread
 task.spawn(function()
     local lastBindDown = false
     local nextClickAt = tick()
@@ -376,7 +462,6 @@ task.spawn(function()
             pcall(function() bindDown = iskeypressed(bindKey) == true end)
         end
 
-        -- Flankenerkennung: Eine gedrückte Taste schaltet nur einmal um.
         if bindDown and not lastBindDown then
             if generalEnabled then
                 bindEnabled = not bindEnabled
@@ -392,7 +477,7 @@ task.spawn(function()
             and bindEnabled
             and not listeningForBind
             and not draggingWindow
-            and not draggingSlider
+            and draggingWhich == nil
             and isrbxactive()
             and not pointerOverWindow(Mouse.X, Mouse.Y)
 
@@ -402,10 +487,9 @@ task.spawn(function()
                 pcall(setrobloxinput, true)
                 pcall(mouse1click)
                 injectingClick = false
-                nextClickAt = now + (1 / cps)
+                nextClickAt = now + randomInterval()
             end
         else
-            -- Nach einer Pause sofort wieder sauber starten, ohne Click-Burst.
             nextClickAt = now
         end
 
@@ -414,4 +498,3 @@ task.spawn(function()
 end)
 
 render()
-
