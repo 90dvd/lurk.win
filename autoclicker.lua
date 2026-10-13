@@ -115,7 +115,8 @@ local function text(value, color, size, z)
     local object = register(Drawing.new("Text"))
     object.Text = value
     object.Color = color
-    object.FontSize = size or 13
+    -- Matcha Text uses Size as the font size. FontSize is rejected.
+    object.Size = size or 13
     object.Outline = false
     object.Center = false
     object.ZIndex = z or 3
