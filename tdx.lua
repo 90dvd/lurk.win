@@ -112,24 +112,54 @@ local function samePlayer(value)
     return false
 end
 
-local function ownedByMe(model)
-    local names = { "Owner", "owner", "Player", "UserId", "OwnerId" }
-    for i = 1, #names do
+local OWNER_KEYS = {
+    "Owner", "owner", "Player", "UserId", "OwnerId",
+    "OwnerUserId", "PlacedBy", "PlacedByUserId", "Creator", "OwnerName",
+}
+
+-- "mine", "other" oder nil, wenn an diesem Objekt kein Owner steht.
+local function ownerOn(inst)
+    if not inst then return nil end
+    for i = 1, #OWNER_KEYS do
+        local key = OWNER_KEYS[i]
         local attr
         pcall(function()
-            attr = model:GetAttribute(names[i])
+            attr = inst:GetAttribute(key)
         end)
-        if samePlayer(attr) then return true end
-        local child = model:FindFirstChild(names[i])
+        if attr ~= nil then
+            return samePlayer(attr) and "mine" or "other"
+        end
+        local child = inst:FindFirstChild(key)
         if child then
             local value
             pcall(function()
                 value = child.Value
             end)
-            if samePlayer(value) then return true end
+            if value ~= nil then
+                return samePlayer(value) and "mine" or "other"
+            end
         end
     end
-    return false
+    return nil
+end
+
+local function ownedByMe(model)
+    local state = ownerOn(model)
+    if state == nil then
+        local data = model:FindFirstChild("Data")
+            or model:FindFirstChild("Config")
+            or model:FindFirstChild("Info")
+        state = ownerOn(data)
+    end
+    if state == "mine" then return "mine" end
+    if state == "other" then return "other" end
+    local node = model.Parent
+    for _ = 1, 5 do
+        if not node or node == Workspace or node == game then break end
+        if samePlayer(node.Name) then return "mine" end
+        node = node.Parent
+    end
+    return "unknown"
 end
 
 local function modelPosition(model)
@@ -144,10 +174,56 @@ local function modelPosition(model)
     return pos
 end
 
-local function isGoldenMobster(model)
-    local name = string.lower(tostring(model.Name))
+local function textIsGoldenMobster(text)
+    if text == nil then return false end
+    local name = string.lower(tostring(text))
+    local compact = string.gsub(name, "%s+", "")
+    if string.find(compact, "goldenmobster", 1, true) then return true end
     return string.find(name, "golden", 1, true) ~= nil
         and string.find(name, "mobster", 1, true) ~= nil
+end
+
+local HINT_KEYS = {
+    "TowerName", "Tower", "Type", "TowerType", "DisplayName",
+    "UnitName", "Name", "Id", "TowerId",
+}
+
+local function isGoldenMobster(model)
+    if textIsGoldenMobster(model.Name) then return true end
+    for i = 1, #HINT_KEYS do
+        local key = HINT_KEYS[i]
+        local attr
+        pcall(function()
+            attr = model:GetAttribute(key)
+        end)
+        if textIsGoldenMobster(attr) then return true end
+        local child = model:FindFirstChild(key)
+        if child then
+            local value
+            pcall(function()
+                value = child.Value
+            end)
+            if textIsGoldenMobster(value) then return true end
+        end
+    end
+    local data = model:FindFirstChild("Data")
+        or model:FindFirstChild("Config")
+        or model:FindFirstChild("Info")
+        or model:FindFirstChild("Settings")
+    if not data then return false end
+    for i = 1, #HINT_KEYS do
+        local child = data:FindFirstChild(HINT_KEYS[i])
+        if child then
+            local value
+            pcall(function()
+                value = child.Value
+            end)
+            if textIsGoldenMobster(value) or textIsGoldenMobster(child.Name) then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 local function bountyString(model)
@@ -167,7 +243,15 @@ local function bountyString(model)
     return nil, level
 end
 
-local function walk(root, depth, budget, visit)
+local MAP_SKIP = {
+    map = true, terrain = true, baseplate = true, lighting = true,
+    effects = true, debris = true, enemies = true, enemy = true,
+    zombies = true, projectiles = true, paths = true, path = true,
+    environment = true, decor = true, decorations = true, lobby = true,
+    camera = true, background = true, fx = true,
+}
+
+local function walk(root, depth, budget, visit, skip)
     if not root or depth < 0 or budget[1] <= 0 then return end
     local ok, kids = pcall(function()
         return root:GetChildren()
@@ -180,24 +264,76 @@ local function walk(root, depth, budget, visit)
         if child then
             visit(child)
             local className = child.ClassName
-            if className == "Folder" or className == "Model" or className == "Configuration" then
-                walk(child, depth - 1, budget, visit)
+            local skipped = skip and skip[string.lower(tostring(child.Name))]
+            if not skipped and (className == "Folder" or className == "Model" or className == "Configuration") then
+                walk(child, depth - 1, budget, visit, skip)
             end
         end
     end
 end
 
+local TOWER_FOLDERS = { "Towers", "TowerFolder", "PlacedTowers", "PlayerTowers", "Buildings" }
+local reportedLayout = false
+
 local function findTower()
-    local owned, any = nil, nil
-    walk(Workspace, 6, { 2500 }, function(obj)
-        if obj.ClassName == "Model" and isGoldenMobster(obj) then
-            any = obj
-            if ownedByMe(obj) then
-                owned = obj
+    local owned, unknown, foreign = nil, nil, 0
+    local function consider(obj)
+        local className = obj.ClassName
+        if className ~= "Model" and className ~= "Folder" then return end
+        if obj == LocalPlayer.Character then return end
+        if not isGoldenMobster(obj) then return end
+        local who = ownedByMe(obj)
+        if who == "mine" then
+            owned = owned or obj
+        elseif who == "other" then
+            foreign = foreign + 1
+        else
+            unknown = unknown or obj
+        end
+    end
+
+    local roots = {}
+    for i = 1, #TOWER_FOLDERS do
+        local folder = Workspace:FindFirstChild(TOWER_FOLDERS[i])
+        if folder then roots[#roots + 1] = folder end
+    end
+    local ok, top = pcall(function()
+        return Workspace:GetChildren()
+    end)
+    if ok and top then
+        for i = 1, #top do
+            local child = top[i]
+            for n = 1, #TOWER_FOLDERS do
+                local nested = child:FindFirstChild(TOWER_FOLDERS[n])
+                if nested then roots[#roots + 1] = nested end
             end
         end
-    end)
-    return owned or any
+    end
+    for i = 1, #roots do
+        walk(roots[i], 6, { 2000 }, consider, nil)
+    end
+    walk(Workspace, 4, { 1500 }, consider, MAP_SKIP)
+
+    if owned then return owned end
+    if unknown and foreign == 0 then
+        return unknown
+    end
+    if foreign > 0 then
+        return nil, "Golden Mobster gehört einem anderen Spieler"
+    end
+    if not reportedLayout then
+        reportedLayout = true
+        local names = {}
+        if ok and top then
+            for i = 1, math.min(#top, 12) do
+                names[#names + 1] = tostring(top[i].Name)
+            end
+        end
+        if #names > 0 then
+            return nil, "kein eigener Golden Mobster (" .. table.concat(names, ", ") .. ")"
+        end
+    end
+    return nil, "kein eigener Golden Mobster"
 end
 
 -- Mausposition, ohne den Cursor anzufassen.
@@ -339,9 +475,9 @@ local function fireAbility(remote, tower, abilityName, position)
 end
 
 local function castAtMouse()
-    local tower = findTower()
+    local tower, why = findTower()
     if not tower then
-        note("kein Golden Mobster")
+        note(why or "kein eigener Golden Mobster")
         return
     end
     local abilityName, level = bountyString(tower)
