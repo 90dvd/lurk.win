@@ -117,8 +117,7 @@ local OWNER_KEYS = {
     "OwnerUserId", "PlacedBy", "PlacedByUserId", "Creator", "OwnerName",
 }
 
--- "mine", "other" oder nil, wenn an diesem Objekt kein Owner steht.
-local function ownerOn(inst)
+local function readOwnerValue(inst)
     if not inst then return nil end
     for i = 1, #OWNER_KEYS do
         local key = OWNER_KEYS[i]
@@ -126,40 +125,89 @@ local function ownerOn(inst)
         pcall(function()
             attr = inst:GetAttribute(key)
         end)
-        if attr ~= nil then
-            return samePlayer(attr) and "mine" or "other"
-        end
+        if attr ~= nil then return attr end
         local child = inst:FindFirstChild(key)
         if child then
             local value
             pcall(function()
                 value = child.Value
             end)
-            if value ~= nil then
-                return samePlayer(value) and "mine" or "other"
-            end
+            if value ~= nil then return value end
         end
     end
     return nil
 end
 
-local function ownedByMe(model)
-    local state = ownerOn(model)
-    if state == nil then
+local function playerFromValue(value)
+    if value == nil then return nil end
+    if value == LocalPlayer then return LocalPlayer end
+    local className
+    pcall(function()
+        className = value.ClassName
+    end)
+    if className == "Player" then return value end
+    local wanted = tostring(value)
+    local list
+    pcall(function()
+        list = Players:GetPlayers()
+    end)
+    if not list then return nil end
+    for i = 1, #list do
+        local player = list[i]
+        if player == value or player.Name == wanted or tostring(player.UserId) == wanted then
+            return player
+        end
+    end
+    return nil
+end
+
+local function sameTeam(player)
+    if not player or player == LocalPlayer then return false end
+    local mine, theirs
+    pcall(function()
+        mine = LocalPlayer.Team
+    end)
+    pcall(function()
+        theirs = player.Team
+    end)
+    if mine ~= nil and theirs ~= nil then
+        return mine == theirs
+    end
+    return true
+end
+
+-- "mine" / "teammate" / "other" / "unknown", plus Anzeigename.
+local function classify(model)
+    local value = readOwnerValue(model)
+    if value == nil then
         local data = model:FindFirstChild("Data")
             or model:FindFirstChild("Config")
             or model:FindFirstChild("Info")
-        state = ownerOn(data)
+        value = readOwnerValue(data)
     end
-    if state == "mine" then return "mine" end
-    if state == "other" then return "other" end
-    local node = model.Parent
-    for _ = 1, 5 do
-        if not node or node == Workspace or node == game then break end
-        if samePlayer(node.Name) then return "mine" end
-        node = node.Parent
+    if value == nil then
+        local node = model.Parent
+        for _ = 1, 5 do
+            if not node or node == Workspace or node == game then break end
+            if samePlayer(node.Name) then
+                return "mine", LocalPlayer.Name
+            end
+            local player = playerFromValue(node.Name)
+            if player and player ~= LocalPlayer then
+                if sameTeam(player) then return "teammate", player.Name end
+                return "other", player.Name
+            end
+            node = node.Parent
+        end
+        return "unknown", "?"
     end
-    return "unknown"
+    if samePlayer(value) then return "mine", LocalPlayer.Name end
+    local player = playerFromValue(value)
+    if player and player ~= LocalPlayer then
+        if sameTeam(player) then return "teammate", player.Name end
+        return "other", player.Name
+    end
+    return "other", tostring(value)
 end
 
 local function modelPosition(model)
@@ -272,24 +320,114 @@ local function walk(root, depth, budget, visit, skip)
     end
 end
 
+local function bountyInfo(model)
+    local ability, level = bountyString(model)
+    local tier
+    if ability == BOUNTY_NAME[3] then tier = 1
+    elseif ability == BOUNTY_NAME[4] then tier = 2
+    elseif ability == BOUNTY_NAME[5] then tier = 3
+    end
+    return tier, ability, level
+end
+
+local function logLine(text)
+    print("[tdx] " .. tostring(text))
+end
+
+local function logScan(rows)
+    local mine = {}
+    local teammates, teammateOrder = {}, {}
+    local others, otherOrder = {}, {}
+    local unknown = 0
+    local function add(map, order, name)
+        if map[name] then
+            map[name] = map[name] + 1
+        else
+            map[name] = 1
+            order[#order + 1] = name
+        end
+    end
+    for i = 1, #rows do
+        local row = rows[i]
+        if row.kind == "mine" then
+            mine[#mine + 1] = row
+        elseif row.kind == "teammate" then
+            add(teammates, teammateOrder, row.ownerName)
+        elseif row.kind == "other" then
+            add(others, otherOrder, row.ownerName)
+        else
+            unknown = unknown + 1
+        end
+    end
+
+    logLine("eigene Golden Mobster: " .. tostring(#mine))
+    if #teammateOrder == 0 then
+        logLine("teammates: keine")
+    else
+        for i = 1, #teammateOrder do
+            local name = teammateOrder[i]
+            logLine("teammate " .. name .. ": " .. tostring(teammates[name]))
+        end
+    end
+    for i = 1, #otherOrder do
+        local name = otherOrder[i]
+        logLine("anderer Spieler " .. name .. ": " .. tostring(others[name]))
+    end
+    if unknown > 0 then
+        logLine("ohne Owner: " .. tostring(unknown))
+    end
+    if #mine == 0 then
+        logLine("eigener: keiner platziert")
+    end
+    for i = 1, #mine do
+        local row = mine[i]
+        local prefix = #mine == 1 and "eigener" or ("eigener " .. tostring(i))
+        if row.tier then
+            logLine(prefix .. ": Ability unlocked, Stufe " .. tostring(row.tier) .. " (" .. row.ability .. ")")
+        elseif row.level > 0 then
+            logLine(prefix .. ": Ability noch nicht unlocked (Bottom " .. tostring(row.level) .. ")")
+        else
+            logLine(prefix .. ": Ability noch nicht unlocked")
+        end
+    end
+end
+
 local TOWER_FOLDERS = { "Towers", "TowerFolder", "PlacedTowers", "PlayerTowers", "Buildings" }
 local reportedLayout = false
 
-local function findTower()
-    local owned, unknown, foreign = nil, nil, 0
+local function scanTowers()
+    local rows, seen = {}, {}
     local function consider(obj)
+        if seen[obj] then return end
         local className = obj.ClassName
         if className ~= "Model" and className ~= "Folder" then return end
         if obj == LocalPlayer.Character then return end
         if not isGoldenMobster(obj) then return end
-        local who = ownedByMe(obj)
-        if who == "mine" then
-            owned = owned or obj
-        elseif who == "other" then
-            foreign = foreign + 1
-        else
-            unknown = unknown or obj
+        if className == "Folder" then
+            local kids
+            pcall(function()
+                kids = obj:GetChildren()
+            end)
+            if kids then
+                for i = 1, #kids do
+                    local child = kids[i]
+                    if child.ClassName == "Model" and isGoldenMobster(child) then
+                        return
+                    end
+                end
+            end
         end
+        seen[obj] = true
+        local kind, ownerName = classify(obj)
+        local tier, ability, level = bountyInfo(obj)
+        rows[#rows + 1] = {
+            model = obj,
+            kind = kind,
+            ownerName = ownerName,
+            tier = tier,
+            ability = ability,
+            level = level or 0,
+        }
     end
 
     local roots = {}
@@ -313,15 +451,26 @@ local function findTower()
         walk(roots[i], 6, { 2000 }, consider, nil)
     end
     walk(Workspace, 4, { 1500 }, consider, MAP_SKIP)
+    logScan(rows)
 
+    local owned, unknown, foreign = nil, nil, false
+    for i = 1, #rows do
+        local row = rows[i]
+        if row.kind == "mine" and row.tier then
+            owned = row.model
+            break
+        end
+        if row.kind == "mine" and not owned then
+            owned = row.model
+        elseif row.kind == "unknown" then
+            unknown = unknown or row.model
+        elseif row.kind == "teammate" or row.kind == "other" then
+            foreign = true
+        end
+    end
     if owned then return owned end
-    if unknown and foreign == 0 then
-        return unknown
-    end
-    if foreign > 0 then
-        return nil, "Golden Mobster gehört einem anderen Spieler"
-    end
-    if not reportedLayout then
+    if unknown and not foreign then return unknown end
+    if not reportedLayout and #rows == 0 then
         reportedLayout = true
         local names = {}
         if ok and top then
@@ -330,10 +479,10 @@ local function findTower()
             end
         end
         if #names > 0 then
-            return nil, "kein eigener Golden Mobster (" .. table.concat(names, ", ") .. ")"
+            logLine("workspace: " .. table.concat(names, ", "))
         end
     end
-    return nil, "kein eigener Golden Mobster"
+    return nil
 end
 
 -- Mausposition, ohne den Cursor anzufassen.
@@ -475,9 +624,8 @@ local function fireAbility(remote, tower, abilityName, position)
 end
 
 local function castAtMouse()
-    local tower, why = findTower()
+    local tower = scanTowers()
     if not tower then
-        note(why or "kein eigener Golden Mobster")
         return
     end
     local abilityName, level = bountyString(tower)
