@@ -284,16 +284,39 @@ local function isGoldenMobster(model)
     return false
 end
 
+local function eachAttr(inst, fn)
+    local attrs
+    local ok = pcall(function()
+        attrs = inst:GetAttributes()
+    end)
+    if not ok or type(attrs) ~= "table" then return end
+    local numeric = true
+    for key, value in pairs(attrs) do
+        if type(key) ~= "number" then
+            numeric = false
+            fn(tostring(key), value)
+        end
+    end
+    if not numeric then return end
+    for i = 1, #attrs do
+        local entry = attrs[i]
+        if type(entry) == "string" then
+            local value
+            pcall(function()
+                value = inst:GetAttribute(entry)
+            end)
+            fn(entry, value)
+        elseif type(entry) == "table" then
+            local name = entry.Name or entry.name or entry[1]
+            local value = entry.Value or entry.value or entry[2]
+            if name ~= nil then fn(tostring(name), value) end
+        end
+    end
+end
+
 local function visitValues(inst, fn, depth)
     if not inst or depth < 0 then return end
-    pcall(function()
-        local attrs = inst:GetAttributes()
-        if type(attrs) == "table" then
-            for key, value in pairs(attrs) do
-                fn(tostring(key), value)
-            end
-        end
-    end)
+    eachAttr(inst, fn)
     local kids
     pcall(function()
         kids = inst:GetChildren()
@@ -315,8 +338,8 @@ local function visitValues(inst, fn, depth)
     end
 end
 
--- Pfad ist oben-unten. 2-3 bedeutet 2 Upgrades oben und 3 unten.
--- Eine einzelne Model-Zahl zaehlt als oben, Base ist 0-0.
+-- Pfad ist oben-unten. 2-4 bedeutet 2 Upgrades oben und 4 unten.
+-- Die einzelne Model-Zahl (z.B. "4") ist nur der Skin, nicht der Pfad.
 local function isDigits(s)
     if s == nil or s == "" then return false end
     local i = 1
@@ -354,7 +377,41 @@ local function considerPathText(text, state)
     state.explicit = true
 end
 
+local PATH_ATTRS = {
+    "Top", "Bottom", "TopPath", "BottomPath", "Path1", "Path2",
+    "Upgrade1", "Upgrade2", "UpgradeTop", "UpgradeBottom",
+    "Upgrades", "Upgrade", "Path", "UpgradePath", "Level", "Levels",
+}
+
+local function considerUserdata(value, state)
+    local inner
+    pcall(function()
+        inner = value.Value
+    end)
+    if type(inner) == "number" or type(inner) == "string" then
+        return inner
+    end
+    local x, y
+    pcall(function()
+        x = value.X
+        y = value.Y
+    end)
+    if type(x) == "number" and type(y) == "number" then
+        state.top = x
+        state.bot = y
+        state.explicit = true
+        return nil
+    end
+    return nil
+end
+
 local function considerPathKey(name, value, state)
+    if state.explicit and state.top ~= nil and state.bot ~= nil then return end
+    if type(value) == "userdata" then
+        local inner = considerUserdata(value, state)
+        if inner == nil then return end
+        value = inner
+    end
     local n = string.lower(tostring(name))
     if type(value) == "string" then
         considerPathText(value, state)
@@ -372,17 +429,35 @@ local function considerPathKey(name, value, state)
     end
 end
 
+local function readKnownPath(inst, state)
+    if state.explicit and state.top ~= nil and state.bot ~= nil then return end
+    for i = 1, #PATH_ATTRS do
+        local key = PATH_ATTRS[i]
+        local value
+        pcall(function()
+            value = inst:GetAttribute(key)
+        end)
+        if value == nil then
+            local child = inst:FindFirstChild(key)
+            if child then
+                pcall(function()
+                    value = child.Value
+                end)
+            end
+        end
+        if value ~= nil and type(value) ~= "function" then
+            considerPathKey(key, value, state)
+        end
+    end
+end
+
 local function walkPath(inst, depth, state)
     if not inst or depth < 0 then return end
     considerPathText(inst.Name, state)
-    pcall(function()
-        local attrs = inst:GetAttributes()
-        if type(attrs) == "table" then
-            for key, value in pairs(attrs) do
-                considerPathKey(key, value, state)
-            end
-        end
+    eachAttr(inst, function(key, value)
+        considerPathKey(key, value, state)
     end)
+    readKnownPath(inst, state)
     local kids
     pcall(function()
         kids = inst:GetChildren()
@@ -412,34 +487,70 @@ local function walkPath(inst, depth, state)
 end
 
 local function skinPath(model)
-    local kids
-    pcall(function()
-        kids = model:GetChildren()
-    end)
-    if not kids then return nil, nil end
-    for i = 1, #kids do
-        if kids[i].ClassName == "Model" then
-            local name = tostring(kids[i].Name)
-            local top, bot, ok = pairFromText(name)
-            if ok then return top or 0, bot or 0 end
-            if string.lower(name) == "base" then return 0, 0 end
-            if isDigits(name) then return tonumber(name), 0 end
+    local digits = {}
+    local sawBase = false
+    local function addDigit(n)
+        for i = 1, #digits do
+            if digits[i] == n then return end
         end
+        digits[#digits + 1] = n
     end
+    local function scan(inst, depth)
+        if not inst or depth < 0 then return nil, nil end
+        local kids
+        pcall(function()
+            kids = inst:GetChildren()
+        end)
+        if not kids then return nil, nil end
+        for i = 1, #kids do
+            local child = kids[i]
+            local className = child.ClassName
+            if className == "Model" or className == "Folder" or className == "Configuration" then
+                local name = tostring(child.Name)
+                local top, bot, ok = pairFromText(name)
+                if ok then return top or 0, bot or 0 end
+                if string.lower(name) == "base" then
+                    sawBase = true
+                elseif isDigits(name) then
+                    addDigit(tonumber(name))
+                end
+                if depth > 0 then
+                    local nestedTop, nestedBot = scan(child, depth - 1)
+                    if nestedTop ~= nil or nestedBot ~= nil then
+                        return nestedTop, nestedBot
+                    end
+                end
+            end
+        end
+        return nil, nil
+    end
+    local top, bot = scan(model, 3)
+    if top ~= nil or bot ~= nil then return top, bot end
+    if #digits >= 2 then
+        local lo, hi = digits[1], digits[1]
+        for i = 2, #digits do
+            if digits[i] < lo then lo = digits[i] end
+            if digits[i] > hi then hi = digits[i] end
+        end
+        return lo, hi
+    end
+    if #digits == 1 then return nil, digits[1] end
+    if sawBase then return 0, 0 end
     return nil, nil
 end
 
 local function readPath(model)
     local state = {}
-    walkPath(model, 4, state)
-    if not state.explicit then
+    walkPath(model, 5, state)
+    if not (state.explicit and state.top ~= nil and state.bot ~= nil) then
         local skinTop, skinBot = skinPath(model)
         if state.top == nil then state.top = skinTop end
         if state.bot == nil then state.bot = skinBot end
     end
     if state.top ~= nil then state.top = math.floor(state.top) end
     if state.bot ~= nil then state.bot = math.floor(state.bot) end
-    return state.top, state.bot
+    local explicit = state.explicit and state.top ~= nil and state.bot ~= nil
+    return state.top, state.bot, explicit
 end
 
 local function bountyString(model)
@@ -500,7 +611,9 @@ end
 
 local function pathText(top, bot)
     if top == nil and bot == nil then return "?" end
-    return tostring(top or 0) .. "-" .. tostring(bot or 0)
+    local left = top == nil and "?" or tostring(top)
+    local right = bot == nil and "?" or tostring(bot)
+    return left .. "-" .. right
 end
 
 local function logScan(rows)
@@ -571,8 +684,104 @@ local function childNames(root, limit)
     return table.concat(names, ", ")
 end
 
+local function ownerHit(name, value)
+    if value == nil then return nil end
+    local n = string.lower(tostring(name))
+    if string.find(n, "owner", 1, true) or n == "userid" or n == "player" or n == "placedby" or n == "uid" then
+        return value
+    end
+    return nil
+end
+
+local function findOwner(inst, depth)
+    if not inst or depth < 0 then return nil end
+    local direct = readOwnerValue(inst)
+    if direct ~= nil then return direct end
+    local found
+    eachAttr(inst, function(name, value)
+        if found ~= nil then return end
+        found = ownerHit(name, value)
+    end)
+    if found ~= nil then return found end
+    local kids
+    pcall(function()
+        kids = inst:GetChildren()
+    end)
+    if not kids then return nil end
+    for i = 1, #kids do
+        local child = kids[i]
+        local value
+        local ok = pcall(function()
+            value = child.Value
+        end)
+        if ok and value ~= nil then
+            local hit = ownerHit(child.Name, value)
+            if hit ~= nil then return hit end
+        end
+        local className = child.ClassName
+        if className == "TextLabel" or className == "TextButton" or className == "TextBox" then
+            local text
+            pcall(function()
+                text = child.Text
+            end)
+            if text ~= nil and playerFromValue(text) then
+                return text
+            end
+        end
+        if depth > 0 and (className == "Model" or className == "Folder" or className == "Configuration" or className == "BillboardGui" or className == "SurfaceGui") then
+            local nested = findOwner(child, depth - 1)
+            if nested ~= nil then return nested end
+        end
+    end
+    return nil
+end
+
+local function applyOwner(value)
+    if value == nil then return nil, nil end
+    if samePlayer(value) then return "mine", LocalPlayer.Name end
+    local player = playerFromValue(value)
+    if player == LocalPlayer then return "mine", LocalPlayer.Name end
+    if player then
+        if sameTeam(player) then return "teammate", player.Name end
+        return "other", player.Name
+    end
+    return "other", tostring(value)
+end
+
+local function collectOwnedRefs(root, depth, budget, set)
+    if not root or depth < 0 or budget[1] <= 0 then return end
+    budget[1] = budget[1] - 1
+    local value
+    pcall(function()
+        value = root.Value
+    end)
+    if value ~= nil and value ~= root then
+        local golden = false
+        pcall(function()
+            golden = isGoldenMobster(value)
+        end)
+        if golden then set[value] = true end
+    end
+    if depth == 0 then return end
+    local kids
+    pcall(function()
+        kids = root:GetChildren()
+    end)
+    if not kids then return end
+    for i = 1, #kids do
+        collectOwnedRefs(kids[i], depth - 1, budget, set)
+    end
+end
+
 local function scanTowers()
     local rows, seen = {}, {}
+    local ownedRefs = {}
+    collectOwnedRefs(LocalPlayer, 6, { 800 }, ownedRefs)
+    local haveRefs = false
+    for _ in pairs(ownedRefs) do
+        haveRefs = true
+        break
+    end
     local function consider(obj)
         if not obj or seen[obj] then return end
         if not isTowerInstance(obj) then return end
@@ -595,25 +804,16 @@ local function scanTowers()
         seen[obj] = true
         local kind, ownerName = classify(obj)
         if kind == "unknown" then
-            local ownerValue
-            visitValues(obj, function(name, value)
-                if ownerValue ~= nil then return end
-                local n = string.lower(name)
-                if string.find(n, "owner", 1, true) or n == "userid" or n == "player" or n == "placedby" then
-                    ownerValue = value
-                end
-            end, 2)
-            if ownerValue ~= nil then
-                if samePlayer(ownerValue) then
-                    kind, ownerName = "mine", LocalPlayer.Name
-                else
-                    local player = playerFromValue(ownerValue)
-                    if player and player ~= LocalPlayer and sameTeam(player) then
-                        kind, ownerName = "teammate", player.Name
-                    else
-                        kind, ownerName = "other", tostring(player and player.Name or ownerValue)
-                    end
-                end
+            kind, ownerName = applyOwner(findOwner(obj, 5))
+            if kind == nil then
+                kind, ownerName = "unknown", "?"
+            end
+        end
+        if haveRefs then
+            if ownedRefs[obj] then
+                kind, ownerName = "mine", LocalPlayer.Name
+            elseif kind == "unknown" then
+                kind, ownerName = "teammate", "?"
             end
         end
         local tier, ability, top, bot = bountyInfo(obj)
