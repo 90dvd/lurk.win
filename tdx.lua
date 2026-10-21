@@ -5,9 +5,8 @@
     kein Cursor-Move. Der Aufruf geht über den Ability-String
     (GoldenMobsterBounty1 / 2 / 3), nicht über H oder das Ability-Menü.
 
-    Matcha: FireServer braucht Hybrid.
-        _G.hybrid = true
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/90dvd/lurk.win/refs/heads/main/tdx.lua"))()
+    Matcha schickt FireServer nur, wenn im Client Hybrid an ist.
+    Das Script prüft _G.hybrid nicht mehr und blockiert F deshalb nicht.
 ]]
 
 pcall(function()
@@ -340,10 +339,6 @@ local function fireAbility(remote, tower, abilityName, position)
 end
 
 local function castAtMouse()
-    if not _G.hybrid then
-        note("FireServer braucht Hybrid: _G.hybrid = true vor dem Inject")
-        return
-    end
     local tower = findTower()
     if not tower then
         note("kein Golden Mobster")
