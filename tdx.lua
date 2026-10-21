@@ -588,53 +588,29 @@ local function scanTowers()
         end
     end
 
-    if not reportedLayout then
-        reportedLayout = true
-        local found
-        local function check(obj)
-            if found or not obj then return end
-            if readAddress(obj) == TARGET_ADDR then found = obj end
-        end
-        local function seek(root, depth, budget)
-            if found or not root or depth < 0 or budget[1] <= 0 then return end
-            local kids
-            pcall(function()
-                kids = root:GetChildren()
-            end)
-            if not kids then return end
-            for i = 1, #kids do
-                if found or budget[1] <= 0 then return end
-                budget[1] = budget[1] - 1
-                local child = kids[i]
-                check(child)
-                local className = child.ClassName
-                local lname = string.lower(tostring(child.Name))
-                if not MAP_SKIP[lname] and (className == "Folder" or className == "Configuration" or className == "Model") then
-                    seek(child, depth - 1, budget)
+    local unique = {}
+    for i = 1, #rows do
+        local pos = modelPosition(rows[i].model)
+        local dup = false
+        if pos then
+            for j = 1, #unique do
+                local other = modelPosition(unique[j].model)
+                if other then
+                    local dx = pos.X - other.X
+                    local dy = pos.Y - other.Y
+                    local dz = pos.Z - other.Z
+                    if dx * dx + dy * dy + dz * dz < 1 then
+                        dup = true
+                        break
+                    end
                 end
             end
         end
-        seek(gameFolder or Workspace, 12, { 6000 })
-        if not found then
-            seek(ReplicatedStorage, 8, { 4000 })
-        end
-        if found then
-            logLine("adresse = " .. tostring(found.ClassName) .. " " .. tostring(found.Name) .. " @ " .. instancePath(found))
-        else
-            logLine("adresse 0x1AFB915D800 nicht gefunden")
-            local sample
-            pcall(function()
-                local kids = (gameFolder or Workspace):GetChildren()
-                sample = kids[1]
-            end)
-            if sample and readAddress(sample) == nil then
-                logLine("Address-Property nicht lesbar")
-            end
-        end
-        if gameFolder then
-            logLine("Game: " .. childNames(gameFolder, 16))
+        if not dup then
+            unique[#unique + 1] = rows[i]
         end
     end
+    rows = unique
 
     logScan(rows)
 
@@ -806,7 +782,6 @@ local function castAtMouse()
     end
     local abilityName, level = bountyString(tower)
     if not abilityName then
-        note("Bounty-Pfad nicht am Part gefunden, Daten stehen im Log")
         return
     end
     local position = mouseWorld(LocalPlayer:GetMouse())
