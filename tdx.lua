@@ -315,24 +315,43 @@ local function visitValues(inst, fn, depth)
     end
 end
 
--- Pfad ist "oben-unten", z.B. 2-3 = 2 Upgrades oben, 3 unten.
--- Die Zahl im Model-Namen ("2", "3", "Base") ist die obere Stufe,
--- solange nirgends ein echtes "2-3" steht.
-local function considerPathText(text, state)
-    if state.top ~= nil and state.bot ~= nil then return end
+-- Pfad ist oben-unten. 2-3 bedeutet 2 Upgrades oben und 3 unten.
+-- Eine einzelne Model-Zahl zaehlt als oben, Base ist 0-0.
+local function isDigits(s)
+    if s == nil or s == "" then return false end
+    local i = 1
+    while true do
+        local c = string.sub(s, i, i)
+        if c == "" then return true end
+        if c < "0" or c > "9" then return false end
+        i = i + 1
+        if i > 8 then return false end
+    end
+end
+
+local function pairFromText(text)
     local s = tostring(text)
-    local a, b = string.match(s, "^(%d+)%-(%d+)$")
-    if a then
-        state.top = tonumber(a)
-        state.bot = tonumber(b)
-        state.explicit = true
-        return
+    local dash = string.find(s, "-", 1, true)
+    if not dash or dash == 1 then return nil, nil, false end
+    local left = string.sub(s, 1, dash - 1)
+    local right = string.sub(s, dash + 1)
+    if right == "" or string.find(right, "-", 1, true) then return nil, nil, false end
+    if string.lower(left) == "x" and isDigits(right) then
+        return nil, tonumber(right), true
     end
-    local x = string.match(string.lower(s), "^x%-(%d+)$")
-    if x then
-        state.bot = tonumber(x)
-        state.explicit = true
+    if isDigits(left) and isDigits(right) then
+        return tonumber(left), tonumber(right), true
     end
+    return nil, nil, false
+end
+
+local function considerPathText(text, state)
+    if state.explicit then return end
+    local top, bot, ok = pairFromText(text)
+    if not ok then return end
+    if top ~= nil then state.top = top end
+    if bot ~= nil then state.bot = bot end
+    state.explicit = true
 end
 
 local function considerPathKey(name, value, state)
@@ -401,11 +420,10 @@ local function skinPath(model)
     for i = 1, #kids do
         if kids[i].ClassName == "Model" then
             local name = tostring(kids[i].Name)
-            local a, b = string.match(name, "^(%d+)%-(%d+)$")
-            if a then return tonumber(a), tonumber(b) end
+            local top, bot, ok = pairFromText(name)
+            if ok then return top or 0, bot or 0 end
             if string.lower(name) == "base" then return 0, 0 end
-            local only = string.match(name, "^(%d+)$")
-            if only then return tonumber(only), 0 end
+            if isDigits(name) then return tonumber(name), 0 end
         end
     end
     return nil, nil
