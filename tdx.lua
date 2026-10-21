@@ -214,6 +214,10 @@ local function modelPosition(model)
     if not model then return nil end
     local pos
     pcall(function()
+        if model.ClassName == "Part" or model.ClassName == "MeshPart" or model.ClassName == "UnionOperation" then
+            pos = model.Position
+            return
+        end
         local part = model:FindFirstChild("HumanoidRootPart")
             or model:FindFirstChild("Head")
             or model:FindFirstChildWhichIsA("BasePart")
@@ -235,6 +239,12 @@ local HINT_KEYS = {
     "TowerName", "Tower", "Type", "TowerType", "DisplayName",
     "UnitName", "Name", "Id", "TowerId",
 }
+
+local function isTowerInstance(obj)
+    local className = obj.ClassName
+    return className == "Model" or className == "Folder" or className == "Part"
+        or className == "MeshPart" or className == "UnionOperation"
+end
 
 local function isGoldenMobster(model)
     if textIsGoldenMobster(model.Name) then return true end
@@ -293,8 +303,11 @@ end
 
 local MAP_SKIP = {
     map = true, terrain = true, baseplate = true, lighting = true,
-    effects = true, debris = true, enemies = true, enemy = true,
+    effects = true, debris = true,     enemies = true, enemy = true,
     zombies = true, projectiles = true, paths = true, path = true,
+    pathentities = true, placementprobes = true, spaceoccupiers = true,
+    staticentities = true, raycastignore = true, mapentities = true,
+    soundfolder = true, map = true, cutscenes = true,
     environment = true, decor = true, decorations = true, lobby = true,
     camera = true, background = true, fx = true,
 }
@@ -349,7 +362,7 @@ local function logScan(rows)
     end
     for i = 1, #rows do
         local row = rows[i]
-        if row.kind == "mine" then
+        if row.kind == "mine" or row.kind == "unknown" then
             mine[#mine + 1] = row
         elseif row.kind == "teammate" then
             add(teammates, teammateOrder, row.ownerName)
@@ -382,12 +395,13 @@ local function logScan(rows)
     for i = 1, #mine do
         local row = mine[i]
         local prefix = #mine == 1 and "eigener" or ("eigener " .. tostring(i))
+        local ownerNote = row.kind == "unknown" and " (Owner nicht am Part)" or ""
         if row.tier then
-            logLine(prefix .. ": Ability unlocked, Stufe " .. tostring(row.tier) .. " (" .. row.ability .. ")")
+            logLine(prefix .. ": Ability unlocked, Stufe " .. tostring(row.tier) .. " (" .. row.ability .. ")" .. ownerNote)
         elseif row.level > 0 then
-            logLine(prefix .. ": Ability noch nicht unlocked (Bottom " .. tostring(row.level) .. ")")
+            logLine(prefix .. ": Ability noch nicht unlocked (Bottom " .. tostring(row.level) .. ")" .. ownerNote)
         else
-            logLine(prefix .. ": Ability noch nicht unlocked")
+            logLine(prefix .. ": Ability noch nicht unlocked" .. ownerNote)
         end
     end
 end
@@ -443,11 +457,10 @@ local function scanTowers()
     local rows, seen = {}, {}
     local function consider(obj)
         if not obj or seen[obj] then return end
-        local className = obj.ClassName
-        if className ~= "Model" and className ~= "Folder" then return end
+        if not isTowerInstance(obj) then return end
         if obj == LocalPlayer.Character then return end
         if not isGoldenMobster(obj) then return end
-        if className == "Folder" then
+        if obj.ClassName == "Folder" then
             local kids
             pcall(function()
                 kids = obj:GetChildren()
@@ -484,7 +497,8 @@ local function scanTowers()
     end
 
     local gameFolder = Workspace:FindFirstChild("Game")
-    addRoot(gameFolder)
+    local towersFolder = gameFolder and gameFolder:FindFirstChild("Towers")
+    addRoot(towersFolder)
     for i = 1, #TOWER_FOLDERS do
         addRoot(Workspace:FindFirstChild(TOWER_FOLDERS[i]))
         if gameFolder then
@@ -513,7 +527,7 @@ local function scanTowers()
                 if not MAP_SKIP[lname] then
                     collect(child, depth - 1, budget)
                 end
-            elseif className == "Model" then
+            elseif isTowerInstance(child) then
                 consider(child)
             end
         end
