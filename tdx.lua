@@ -315,54 +315,122 @@ local function visitValues(inst, fn, depth)
     end
 end
 
-local function bottomFromText(text)
-    local s = string.lower(tostring(text))
-    local x = string.match(s, "x%-(%d+)")
-    if x then return tonumber(x) end
-    local _, bot = string.match(s, "^(%d+)%-(%d+)$")
-    if bot then return tonumber(bot) end
-    return nil
+-- Pfad ist "oben-unten", z.B. 2-3 = 2 Upgrades oben, 3 unten.
+-- Die Zahl im Model-Namen ("2", "3", "Base") ist die obere Stufe,
+-- solange nirgends ein echtes "2-3" steht.
+local function considerPathText(text, state)
+    if state.top ~= nil and state.bot ~= nil then return end
+    local s = tostring(text)
+    local a, b = string.match(s, "^(%d+)%-(%d+)$")
+    if a then
+        state.top = tonumber(a)
+        state.bot = tonumber(b)
+        state.explicit = true
+        return
+    end
+    local x = string.match(string.lower(s), "^x%-(%d+)$")
+    if x then
+        state.bot = tonumber(x)
+        state.explicit = true
+    end
 end
 
-local function bountyString(model)
-    local level
-    visitValues(model, function(name, value)
-        local n = string.lower(name)
-        local looksPath = string.find(n, "bottom", 1, true)
-            or string.find(n, "path", 1, true)
-            or string.find(n, "upgrade", 1, true)
-            or string.find(n, "level", 1, true)
-        if type(value) == "number" and looksPath and string.find(n, "top", 1, true) == nil then
-            level = value
-        elseif type(value) == "string" and looksPath then
-            local bot = bottomFromText(value)
-            if bot then level = bot end
+local function considerPathKey(name, value, state)
+    local n = string.lower(tostring(name))
+    if type(value) == "string" then
+        considerPathText(value, state)
+        return
+    end
+    if type(value) ~= "number" then return end
+    local isTop = string.find(n, "top", 1, true) or n == "path1" or n == "upgrade1"
+    local isBot = string.find(n, "bottom", 1, true) or n == "path2" or n == "upgrade2"
+    if isTop and not isBot then
+        state.top = value
+        state.explicit = true
+    elseif isBot and not isTop then
+        state.bot = value
+        state.explicit = true
+    end
+end
+
+local function walkPath(inst, depth, state)
+    if not inst or depth < 0 then return end
+    considerPathText(inst.Name, state)
+    pcall(function()
+        local attrs = inst:GetAttributes()
+        if type(attrs) == "table" then
+            for key, value in pairs(attrs) do
+                considerPathKey(key, value, state)
+            end
         end
-    end, 2)
-    level = math.floor(tonumber(level) or 0)
-    if level >= 5 then return BOUNTY_NAME[5], level end
-    if level >= 4 then return BOUNTY_NAME[4], level end
-    if level >= 3 then return BOUNTY_NAME[3], level end
-    return nil, level
+    end)
+    local kids
+    pcall(function()
+        kids = inst:GetChildren()
+    end)
+    if not kids then return end
+    for i = 1, #kids do
+        local child = kids[i]
+        local value
+        local ok = pcall(function()
+            value = child.Value
+        end)
+        if ok and value ~= nil then
+            considerPathKey(child.Name, value, state)
+        end
+        local className = child.ClassName
+        if className == "TextLabel" or className == "TextButton" or className == "TextBox" then
+            local text
+            pcall(function()
+                text = child.Text
+            end)
+            if text then considerPathText(text, state) end
+        end
+        if depth > 0 and (className == "Model" or className == "Folder" or className == "Configuration" or className == "BillboardGui" or className == "SurfaceGui") then
+            walkPath(child, depth - 1, state)
+        end
+    end
 end
 
-local function towerSnapshot(model)
-    local bits = {}
+local function skinPath(model)
     local kids
     pcall(function()
         kids = model:GetChildren()
     end)
-    if kids then
-        for i = 1, math.min(#kids, 8) do
-            bits[#bits + 1] = tostring(kids[i].ClassName) .. ":" .. tostring(kids[i].Name)
+    if not kids then return nil, nil end
+    for i = 1, #kids do
+        if kids[i].ClassName == "Model" then
+            local name = tostring(kids[i].Name)
+            local a, b = string.match(name, "^(%d+)%-(%d+)$")
+            if a then return tonumber(a), tonumber(b) end
+            if string.lower(name) == "base" then return 0, 0 end
+            local only = string.match(name, "^(%d+)$")
+            if only then return tonumber(only), 0 end
         end
     end
-    visitValues(model, function(name, value)
-        if #bits >= 14 then return end
-        bits[#bits + 1] = tostring(name) .. "=" .. tostring(value)
-    end, 1)
-    if #bits == 0 then return "keine Values" end
-    return table.concat(bits, ", ")
+    return nil, nil
+end
+
+local function readPath(model)
+    local state = {}
+    walkPath(model, 4, state)
+    if not state.explicit then
+        local skinTop, skinBot = skinPath(model)
+        if state.top == nil then state.top = skinTop end
+        if state.bot == nil then state.bot = skinBot end
+    end
+    if state.top ~= nil then state.top = math.floor(state.top) end
+    if state.bot ~= nil then state.bot = math.floor(state.bot) end
+    return state.top, state.bot
+end
+
+local function bountyString(model)
+    local _, bot = readPath(model)
+    if bot == nil then return nil end
+    if bot >= 5 then return BOUNTY_NAME[5] end
+    if bot >= 4 then return BOUNTY_NAME[4] end
+    if bot >= 3 then return BOUNTY_NAME[3] end
+    return nil
 end
 
 local MAP_SKIP = {
@@ -398,76 +466,43 @@ local function walk(root, depth, budget, visit, skip)
 end
 
 local function bountyInfo(model)
-    local ability, level = bountyString(model)
+    local top, bot = readPath(model)
+    local ability = bountyString(model)
     local tier
     if ability == BOUNTY_NAME[3] then tier = 1
     elseif ability == BOUNTY_NAME[4] then tier = 2
     elseif ability == BOUNTY_NAME[5] then tier = 3
     end
-    return tier, ability, level
+    return tier, ability, top, bot
 end
 
 local function logLine(text)
     print("[tdx] " .. tostring(text))
 end
 
+local function pathText(top, bot)
+    if top == nil and bot == nil then return "?" end
+    return tostring(top or 0) .. "-" .. tostring(bot or 0)
+end
+
 local function logScan(rows)
     local mine = {}
-    local teammates, teammateOrder = {}, {}
-    local others, otherOrder = {}, {}
-    local unknown = 0
-    local function add(map, order, name)
-        if map[name] then
-            map[name] = map[name] + 1
-        else
-            map[name] = 1
-            order[#order + 1] = name
-        end
-    end
+    local teammates = 0
     for i = 1, #rows do
         local row = rows[i]
         if row.kind == "mine" or row.kind == "unknown" then
             mine[#mine + 1] = row
         elseif row.kind == "teammate" then
-            add(teammates, teammateOrder, row.ownerName)
-        elseif row.kind == "other" then
-            add(others, otherOrder, row.ownerName)
-        else
-            unknown = unknown + 1
+            teammates = teammates + 1
         end
     end
 
     logLine("eigene Golden Mobster: " .. tostring(#mine))
-    if #teammateOrder == 0 then
-        logLine("teammates: keine")
-    else
-        for i = 1, #teammateOrder do
-            local name = teammateOrder[i]
-            logLine("teammate " .. name .. ": " .. tostring(teammates[name]))
-        end
-    end
-    for i = 1, #otherOrder do
-        local name = otherOrder[i]
-        logLine("anderer Spieler " .. name .. ": " .. tostring(others[name]))
-    end
-    if unknown > 0 then
-        logLine("ohne Owner: " .. tostring(unknown))
-    end
-    if #mine == 0 then
-        logLine("eigener: keiner platziert")
-    end
+    logLine("teammates: " .. tostring(teammates))
     for i = 1, #mine do
         local row = mine[i]
         local prefix = #mine == 1 and "eigener" or ("eigener " .. tostring(i))
-        local ownerNote = row.kind == "unknown" and " (Owner nicht am Part)" or ""
-        if row.tier then
-            logLine(prefix .. ": Ability unlocked, Stufe " .. tostring(row.tier) .. " (" .. row.ability .. ")" .. ownerNote)
-        elseif row.level > 0 then
-            logLine(prefix .. ": Ability noch nicht unlocked (Bottom " .. tostring(row.level) .. ")" .. ownerNote)
-        else
-            logLine(prefix .. ": Ability-Pfad nicht am Part" .. ownerNote)
-        end
-        logLine(prefix .. " daten: " .. towerSnapshot(row.model))
+        logLine(prefix .. ": " .. pathText(row.top, row.bot))
     end
 end
 
@@ -563,14 +598,15 @@ local function scanTowers()
                 end
             end
         end
-        local tier, ability, level = bountyInfo(obj)
+        local tier, ability, top, bot = bountyInfo(obj)
         rows[#rows + 1] = {
             model = obj,
             kind = kind,
             ownerName = ownerName,
             tier = tier,
             ability = ability,
-            level = level or 0,
+            top = top,
+            bot = bot,
         }
     end
 
@@ -780,7 +816,7 @@ local function castAtMouse()
     if not tower then
         return
     end
-    local abilityName, level = bountyString(tower)
+    local abilityName = bountyString(tower)
     if not abilityName then
         return
     end
