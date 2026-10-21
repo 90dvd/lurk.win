@@ -394,11 +394,55 @@ end
 
 local TOWER_FOLDERS = { "Towers", "TowerFolder", "PlacedTowers", "PlayerTowers", "Buildings" }
 local reportedLayout = false
+-- Explorer-Adresse aus dieser Session, nur um den echten Pfad zu finden.
+local TARGET_ADDR = tonumber("1AFB915D800", 16)
+
+local function readAddress(obj)
+    local addr
+    pcall(function()
+        addr = obj.Address
+    end)
+    if type(addr) == "number" then return addr end
+    if type(addr) == "string" then
+        local hex = string.gsub(addr, "^0[xX]", "")
+        return tonumber(hex, 16)
+    end
+    return nil
+end
+
+local function instancePath(obj)
+    local parts = {}
+    local node = obj
+    for _ = 1, 14 do
+        if not node then break end
+        table.insert(parts, 1, tostring(node.Name))
+        if node == Workspace or node == ReplicatedStorage or node == game then break end
+        local parent
+        pcall(function()
+            parent = node.Parent
+        end)
+        node = parent
+    end
+    return table.concat(parts, ".")
+end
+
+local function childNames(root, limit)
+    local names = {}
+    local kids
+    pcall(function()
+        kids = root:GetChildren()
+    end)
+    if not kids then return "" end
+    for i = 1, math.min(#kids, limit or 16) do
+        names[#names + 1] = tostring(kids[i].Name)
+    end
+    return table.concat(names, ", ")
+end
 
 local function scanTowers()
     local rows, seen = {}, {}
     local function consider(obj)
-        if seen[obj] then return end
+        if not obj or seen[obj] then return end
         local className = obj.ClassName
         if className ~= "Model" and className ~= "Folder" then return end
         if obj == LocalPlayer.Character then return end
@@ -431,26 +475,104 @@ local function scanTowers()
     end
 
     local roots = {}
-    for i = 1, #TOWER_FOLDERS do
-        local folder = Workspace:FindFirstChild(TOWER_FOLDERS[i])
-        if folder then roots[#roots + 1] = folder end
+    local function addRoot(folder)
+        if not folder then return end
+        for i = 1, #roots do
+            if roots[i] == folder then return end
+        end
+        roots[#roots + 1] = folder
     end
-    local ok, top = pcall(function()
-        return Workspace:GetChildren()
-    end)
-    if ok and top then
-        for i = 1, #top do
-            local child = top[i]
-            for n = 1, #TOWER_FOLDERS do
-                local nested = child:FindFirstChild(TOWER_FOLDERS[n])
-                if nested then roots[#roots + 1] = nested end
+
+    local gameFolder = Workspace:FindFirstChild("Game")
+    addRoot(gameFolder)
+    for i = 1, #TOWER_FOLDERS do
+        addRoot(Workspace:FindFirstChild(TOWER_FOLDERS[i]))
+        if gameFolder then
+            addRoot(gameFolder:FindFirstChild(TOWER_FOLDERS[i]))
+        end
+    end
+
+    -- Ordner mit "tower" im Namen unter Game, ohne die Map zu durchlaufen.
+    local function collect(root, depth, budget)
+        if not root or depth < 0 or budget[1] <= 0 then return end
+        local kids
+        pcall(function()
+            kids = root:GetChildren()
+        end)
+        if not kids then return end
+        for i = 1, #kids do
+            if budget[1] <= 0 then return end
+            budget[1] = budget[1] - 1
+            local child = kids[i]
+            local className = child.ClassName
+            if className == "Folder" or className == "Configuration" then
+                local lname = string.lower(tostring(child.Name))
+                if string.find(lname, "tower", 1, true) or string.find(lname, "mobster", 1, true) then
+                    addRoot(child)
+                end
+                if not MAP_SKIP[lname] then
+                    collect(child, depth - 1, budget)
+                end
+            elseif className == "Model" then
+                consider(child)
             end
         end
     end
+    collect(gameFolder or Workspace, 8, { 2500 })
+
     for i = 1, #roots do
-        walk(roots[i], 6, { 2000 }, consider, nil)
+        walk(roots[i], 6, { 2000 }, consider, MAP_SKIP)
     end
-    walk(Workspace, 4, { 1500 }, consider, MAP_SKIP)
+
+    if not reportedLayout then
+        reportedLayout = true
+        local found
+        local function check(obj)
+            if found or not obj then return end
+            if readAddress(obj) == TARGET_ADDR then found = obj end
+        end
+        local function seek(root, depth, budget)
+            if found or not root or depth < 0 or budget[1] <= 0 then return end
+            local kids
+            pcall(function()
+                kids = root:GetChildren()
+            end)
+            if not kids then return end
+            for i = 1, #kids do
+                if found or budget[1] <= 0 then return end
+                budget[1] = budget[1] - 1
+                local child = kids[i]
+                check(child)
+                local className = child.ClassName
+                local lname = string.lower(tostring(child.Name))
+                if not MAP_SKIP[lname] and (className == "Folder" or className == "Configuration" or className == "Model") then
+                    seek(child, depth - 1, budget)
+                end
+            end
+        end
+        seek(gameFolder or Workspace, 12, { 6000 })
+        if not found then
+            seek(ReplicatedStorage, 8, { 4000 })
+        end
+        if found then
+            logLine("adresse = " .. tostring(found.ClassName) .. " " .. tostring(found.Name) .. " @ " .. instancePath(found))
+            consider(found)
+        else
+            logLine("adresse 0x1AFB915D800 nicht gefunden")
+            local sample
+            pcall(function()
+                local kids = (gameFolder or Workspace):GetChildren()
+                sample = kids[1]
+            end)
+            if sample and readAddress(sample) == nil then
+                logLine("Address-Property nicht lesbar")
+            end
+        end
+        if gameFolder then
+            logLine("Game: " .. childNames(gameFolder, 16))
+        end
+    end
+
     logScan(rows)
 
     local owned, unknown, foreign = nil, nil, false
@@ -470,17 +592,8 @@ local function scanTowers()
     end
     if owned then return owned end
     if unknown and not foreign then return unknown end
-    if not reportedLayout and #rows == 0 then
+    if not reportedLayout and #rows == 0 and not gameFolder then
         reportedLayout = true
-        local names = {}
-        if ok and top then
-            for i = 1, math.min(#top, 12) do
-                names[#names + 1] = tostring(top[i].Name)
-            end
-        end
-        if #names > 0 then
-            logLine("workspace: " .. table.concat(names, ", "))
-        end
     end
     return nil
 end
