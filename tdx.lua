@@ -284,21 +284,85 @@ local function isGoldenMobster(model)
     return false
 end
 
-local function bountyString(model)
-    local level = readNumber(model, {
-        "BottomPath", "Bottom", "Path2", "Upgrade2", "PathB", "BottomLevel",
-    })
-    if not level then
-        local config = model:FindFirstChild("Config") or model:FindFirstChild("Upgrades")
-        level = readNumber(config, {
-            "BottomPath", "Bottom", "Path2", "Upgrade2", "PathB",
-        })
+local function visitValues(inst, fn, depth)
+    if not inst or depth < 0 then return end
+    pcall(function()
+        local attrs = inst:GetAttributes()
+        if type(attrs) == "table" then
+            for key, value in pairs(attrs) do
+                fn(tostring(key), value)
+            end
+        end
+    end)
+    local kids
+    pcall(function()
+        kids = inst:GetChildren()
+    end)
+    if not kids then return end
+    for i = 1, #kids do
+        local child = kids[i]
+        local value
+        local ok = pcall(function()
+            value = child.Value
+        end)
+        if ok and value ~= nil then
+            fn(tostring(child.Name), value)
+        end
+        local className = child.ClassName
+        if depth > 0 and (className == "Folder" or className == "Configuration") then
+            visitValues(child, fn, depth - 1)
+        end
     end
+end
+
+local function bottomFromText(text)
+    local s = string.lower(tostring(text))
+    local x = string.match(s, "x%-(%d+)")
+    if x then return tonumber(x) end
+    local _, bot = string.match(s, "^(%d+)%-(%d+)$")
+    if bot then return tonumber(bot) end
+    return nil
+end
+
+local function bountyString(model)
+    local level
+    visitValues(model, function(name, value)
+        local n = string.lower(name)
+        local looksPath = string.find(n, "bottom", 1, true)
+            or string.find(n, "path", 1, true)
+            or string.find(n, "upgrade", 1, true)
+            or string.find(n, "level", 1, true)
+        if type(value) == "number" and looksPath and string.find(n, "top", 1, true) == nil then
+            level = value
+        elseif type(value) == "string" and looksPath then
+            local bot = bottomFromText(value)
+            if bot then level = bot end
+        end
+    end, 2)
     level = math.floor(tonumber(level) or 0)
     if level >= 5 then return BOUNTY_NAME[5], level end
     if level >= 4 then return BOUNTY_NAME[4], level end
     if level >= 3 then return BOUNTY_NAME[3], level end
     return nil, level
+end
+
+local function towerSnapshot(model)
+    local bits = {}
+    local kids
+    pcall(function()
+        kids = model:GetChildren()
+    end)
+    if kids then
+        for i = 1, math.min(#kids, 8) do
+            bits[#bits + 1] = tostring(kids[i].ClassName) .. ":" .. tostring(kids[i].Name)
+        end
+    end
+    visitValues(model, function(name, value)
+        if #bits >= 14 then return end
+        bits[#bits + 1] = tostring(name) .. "=" .. tostring(value)
+    end, 1)
+    if #bits == 0 then return "keine Values" end
+    return table.concat(bits, ", ")
 end
 
 local MAP_SKIP = {
@@ -401,8 +465,9 @@ local function logScan(rows)
         elseif row.level > 0 then
             logLine(prefix .. ": Ability noch nicht unlocked (Bottom " .. tostring(row.level) .. ")" .. ownerNote)
         else
-            logLine(prefix .. ": Ability noch nicht unlocked" .. ownerNote)
+            logLine(prefix .. ": Ability-Pfad nicht am Part" .. ownerNote)
         end
+        logLine(prefix .. " daten: " .. towerSnapshot(row.model))
     end
 end
 
@@ -476,6 +541,28 @@ local function scanTowers()
         end
         seen[obj] = true
         local kind, ownerName = classify(obj)
+        if kind == "unknown" then
+            local ownerValue
+            visitValues(obj, function(name, value)
+                if ownerValue ~= nil then return end
+                local n = string.lower(name)
+                if string.find(n, "owner", 1, true) or n == "userid" or n == "player" or n == "placedby" then
+                    ownerValue = value
+                end
+            end, 2)
+            if ownerValue ~= nil then
+                if samePlayer(ownerValue) then
+                    kind, ownerName = "mine", LocalPlayer.Name
+                else
+                    local player = playerFromValue(ownerValue)
+                    if player and player ~= LocalPlayer and sameTeam(player) then
+                        kind, ownerName = "teammate", player.Name
+                    else
+                        kind, ownerName = "other", tostring(player and player.Name or ownerValue)
+                    end
+                end
+            end
+        end
         local tier, ability, level = bountyInfo(obj)
         rows[#rows + 1] = {
             model = obj,
@@ -487,55 +574,18 @@ local function scanTowers()
         }
     end
 
-    local roots = {}
-    local function addRoot(folder)
-        if not folder then return end
-        for i = 1, #roots do
-            if roots[i] == folder then return end
-        end
-        roots[#roots + 1] = folder
-    end
-
     local gameFolder = Workspace:FindFirstChild("Game")
     local towersFolder = gameFolder and gameFolder:FindFirstChild("Towers")
-    addRoot(towersFolder)
-    for i = 1, #TOWER_FOLDERS do
-        addRoot(Workspace:FindFirstChild(TOWER_FOLDERS[i]))
-        if gameFolder then
-            addRoot(gameFolder:FindFirstChild(TOWER_FOLDERS[i]))
-        end
-    end
-
-    -- Ordner mit "tower" im Namen unter Game, ohne die Map zu durchlaufen.
-    local function collect(root, depth, budget)
-        if not root or depth < 0 or budget[1] <= 0 then return end
+    if towersFolder then
         local kids
         pcall(function()
-            kids = root:GetChildren()
+            kids = towersFolder:GetChildren()
         end)
-        if not kids then return end
-        for i = 1, #kids do
-            if budget[1] <= 0 then return end
-            budget[1] = budget[1] - 1
-            local child = kids[i]
-            local className = child.ClassName
-            if className == "Folder" or className == "Configuration" then
-                local lname = string.lower(tostring(child.Name))
-                if string.find(lname, "tower", 1, true) or string.find(lname, "mobster", 1, true) then
-                    addRoot(child)
-                end
-                if not MAP_SKIP[lname] then
-                    collect(child, depth - 1, budget)
-                end
-            elseif isTowerInstance(child) then
-                consider(child)
+        if kids then
+            for i = 1, #kids do
+                consider(kids[i])
             end
         end
-    end
-    collect(gameFolder or Workspace, 8, { 2500 })
-
-    for i = 1, #roots do
-        walk(roots[i], 6, { 2000 }, consider, MAP_SKIP)
     end
 
     if not reportedLayout then
@@ -570,7 +620,6 @@ local function scanTowers()
         end
         if found then
             logLine("adresse = " .. tostring(found.ClassName) .. " " .. tostring(found.Name) .. " @ " .. instancePath(found))
-            consider(found)
         else
             logLine("adresse 0x1AFB915D800 nicht gefunden")
             local sample
@@ -757,7 +806,7 @@ local function castAtMouse()
     end
     local abilityName, level = bountyString(tower)
     if not abilityName then
-        note("Bottom-Path zu niedrig (" .. tostring(level) .. "), Bounty ab X-3")
+        note("Bounty-Pfad nicht am Part gefunden, Daten stehen im Log")
         return
     end
     local position = mouseWorld(LocalPlayer:GetMouse())
